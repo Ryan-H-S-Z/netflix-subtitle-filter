@@ -1,0 +1,92 @@
+{
+  "manifest_version": 3,
+  "name": "Netflix 浏览页字幕筛选助手",
+  "version": "1.0.0",
+  "description": "在 Netflix 各浏览页面按任意或同时满足的字幕语言条件自动筛选影片，并可在播放页导入本地字幕。",
+  "minimum_chrome_version": "114",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://www.netflix.com/*"
+  ],
+  "action": {
+    "default_title": "Netflix 浏览页字幕筛选助手",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.netflix.com/*"
+      ],
+      "js": [
+        "src/video-identity.js",
+        "src/netflix-metadata-channel.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.netflix.com/*"
+      ],
+      "js": [
+        "src/video-identity.js",
+        "src/netflix-metadata-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.netflix.com/*"
+      ],
+      "js": [
+        "src/config.js",
+        "src/ui-i18n.js",
+        "src/filter-rules.js",
+        "src/netflix-catalog.js",
+        "src/card-layout.js",
+        "src/card-filter.js"
+      ],
+      "css": [
+        "src/card-filter.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.netflix.com/browse*",
+        "https://www.netflix.com/latest*",
+        "https://www.netflix.com/search*",
+        "https://www.netflix.com/title/*",
+        "https://www.netflix.com/watch/*"
+      ],
+      "js": [
+        "src/config.js",
+        "src/subtitle-parser.js",
+        "src/player-toolbar.js",
+        "src/content.js"
+      ],
+      "css": [
+        "src/content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

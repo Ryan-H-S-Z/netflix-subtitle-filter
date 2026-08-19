@@ -1,0 +1,5 @@
+.DS_Store
+*.zip
+archive/
+node_modules/
+coverage/

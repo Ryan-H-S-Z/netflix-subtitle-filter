@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title data-i18n="documentTitle">Netflix 浏览页字幕筛选助手</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="logo" aria-hidden="true">筛</div>
+        <div>
+          <h1 data-i18n="headerTitle">Netflix 字幕筛选</h1>
+          <p data-i18n="headerSubtitle">自动隐藏已确认不符合字幕条件的影片</p>
+        </div>
+      </header>
+
+      <div class="status" id="status" role="status" aria-live="polite" data-i18n="statusSettingsLoading">正在读取当前设置…</div>
+
+      <section class="card locale-card">
+        <label class="locale-row" for="ui-language">
+          <span class="locale-icon" aria-hidden="true" title="Language / 语言 / 語言">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M3.5 9h17M3.5 15h17M12 3c2.2 2.5 3.3 5.5 3.3 9S14.2 18.5 12 21M12 3C9.8 5.5 8.7 8.5 8.7 12s1.1 6.5 3.3 9"></path>
+            </svg>
+          </span>
+          <span class="locale-copy">
+            <strong data-i18n="uiLanguage">界面语言</strong>
+            <small data-i18n="uiLanguageHint">用于设置弹窗、筛选状态和影片语言标签</small>
+          </span>
+          <select id="ui-language" aria-label="Language / 语言 / 語言" disabled>
+            <option value="zh-hans">简体中文</option>
+            <option value="zh-hant">繁體中文</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="card filter-card">
+        <label class="toggle-row main-toggle">
+          <span>
+            <strong><span data-i18n="autoFilter">自动筛选</span> <em class="switch-state" id="filter-state-label" data-i18n="stateLoading">读取中</em></strong>
+            <small data-i18n="autoFilterHint">切换后立即生效；适用于首页、电影、节目、最新、片单和搜索</small>
+          </span>
+          <input id="filter-enabled" type="checkbox" role="switch" disabled>
+        </label>
+
+        <div class="how-to">
+          <strong data-i18n="howTo">怎么用</strong>
+          <span data-i18n="howStep1">① 选择一个快捷条件或在下方自定义</span>
+          <span data-i18n="howStep2">② 点击红色的“保存并立即筛选”</span>
+          <span data-i18n="howStep3">以后打开 Netflix 会自动使用，不必重复点击</span>
+        </div>
+
+        <div class="section-heading">
+          <strong data-i18n="chooseConditions">选择字幕条件</strong>
+          <small data-i18n="presets">快捷选择</small>
+        </div>
+        <div class="preset-row" aria-label="快捷字幕条件" data-i18n-aria-label="presetAria">
+          <button class="mini" id="preset-chinese" type="button" disabled data-i18n="presetChinese">有中文即可</button>
+          <button class="mini" id="preset-chinese-english" type="button" disabled data-i18n="presetChineseEnglish">中文 + 英文</button>
+          <button class="mini" id="preset-simplified-english" type="button" disabled data-i18n="presetSimplifiedEnglish">简中 + 英文</button>
+          <button class="mini" id="preset-traditional-english" type="button" disabled data-i18n="presetTraditionalEnglish">繁中 + 英文</button>
+          <button class="mini" id="preset-chinese-thai" type="button" disabled data-i18n="presetChineseThai">中文 + 泰文</button>
+        </div>
+
+        <div class="logic-help" aria-label="条件组合规则" data-i18n-aria-label="logicAria">
+          <span><b data-i18n="sameBoxLabel">同一个框：</b><span data-i18n="sameBoxText">有任意一种即可</span></span>
+          <span><b data-i18n="differentBoxLabel">不同框：</b><span data-i18n="differentBoxText">每个框都必须满足</span></span>
+        </div>
+
+        <div class="groups" id="filter-groups"></div>
+        <button class="add-group" id="add-group" type="button" disabled data-i18n="addGroup">＋ 增加一个“还必须包含”的条件</button>
+
+        <label class="toggle-row badge-toggle">
+          <span>
+            <strong data-i18n="showBadges">在影片卡片显示匹配语言</strong>
+            <small data-i18n="showBadgesHint">仅显示您条件中已确认支持的语言</small>
+          </span>
+          <input id="show-badges" type="checkbox" role="switch" disabled>
+        </label>
+
+        <button class="primary" id="apply-filter" type="button" disabled data-i18n="saveApply">保存并立即筛选</button>
+        <button class="text-button refresh" id="refresh-filter" type="button" disabled data-i18n="manualRefresh">结果不对？清除全部缓存并重新读取</button>
+
+        <label class="toggle-row schedule-toggle">
+          <span>
+            <strong data-i18n="weeklyRefresh">每周自动更新字幕资料</strong>
+            <small id="weekly-refresh-hint" data-i18n="weeklyRefreshHintOff">关闭时仅在您手动点击更新后重新读取</small>
+          </span>
+          <input id="weekly-cache-refresh" type="checkbox" role="switch" disabled>
+        </label>
+
+        <p class="hint" data-i18n="cacheHint">字幕编号与节目名称按地区、Netflix 资料、界面语言和字幕语言长期保存在本机。每周更新只处理当前规则使用且到期的语言；Netflix 未提供可靠的真正增量接口。</p>
+      </section>
+
+      <details class="card player-card">
+        <summary><span data-i18n="playerSummary">播放时导入本地字幕</span> <small data-i18n="optionalFeature">可选功能</small></summary>
+        <div class="player-body">
+          <p data-i18n="playerIntro">导入 SRT、VTT、ASS/SSA。中文字形会影响本地字幕编码判断及下方备用官方目录，不会改变上面的卡片筛选条件。</p>
+          <div class="language-grid" role="radiogroup" aria-label="本地字幕首选中文字形" data-i18n-aria-label="localLanguageAria">
+            <label class="language-option">
+              <input type="radio" name="preferred-language" value="zh-hant">
+              <span><strong data-i18n="traditionalChinese">繁體中文</strong><small data-i18n="big5Hint">Big5 自动判断优先</small></span>
+            </label>
+            <label class="language-option">
+              <input type="radio" name="preferred-language" value="zh-hans">
+              <span><strong data-i18n="simplifiedChinese">简体中文</strong><small data-i18n="gb18030Hint">GB18030 自动判断优先</small></span>
+            </label>
+          </div>
+
+          <label class="toggle-row floating-toggle">
+            <span>
+              <strong data-i18n="floatingButton">播放页悬浮字幕按钮</strong>
+              <small data-i18n="floatingButtonHint">在播放页面显示导入入口</small>
+            </span>
+            <input id="show-floating" type="checkbox" role="switch">
+          </label>
+
+          <button class="secondary" id="open-player-panel" type="button" data-i18n="openPlayerPanel">打开播放页字幕面板</button>
+          <button class="text-button" id="open-official-catalog" type="button" data-i18n="openOfficialCatalog">备用：按所选中文字形打开官方字幕目录</button>
+        </div>
+      </details>
+    </main>
+
+    <script src="../src/config.js"></script>
+    <script src="../src/ui-i18n.js"></script>
+    <script src="../src/cache-schedule.js"></script>
+    <script src="../src/filter-rules.js"></script>
+    <script src="../src/netflix-catalog.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

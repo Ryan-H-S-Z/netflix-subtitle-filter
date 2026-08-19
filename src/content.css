@@ -1,0 +1,8 @@
+#nch-extension-host {
+  all: initial !important;
+  contain: layout style !important;
+  inset: 0 !important;
+  pointer-events: none !important;
+  position: fixed !important;
+  z-index: 2147483647 !important;
+}

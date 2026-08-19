@@ -1,0 +1,10 @@
+{
+  "name": "netflix-home-subtitle-filter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A local Manifest V3 extension for automatically filtering Netflix browsing-page cards by subtitle-language rules and loading local subtitles.",
+  "scripts": {
+    "test": "node --test tests/*.test.js && node scripts/validate-manifest.js",
+    "check": "node --check src/config.js && node --check src/ui-i18n.js && node --check src/cache-schedule.js && node --check src/background.js && node --check src/filter-rules.js && node --check src/netflix-catalog.js && node --check src/video-identity.js && node --check src/netflix-metadata-channel.js && node --check src/netflix-metadata-bridge.js && node --check src/card-layout.js && node --check src/card-filter.js && node --check src/subtitle-parser.js && node --check src/player-toolbar.js && node --check src/content.js && node --check popup/popup.js"
+  }
+}

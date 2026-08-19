@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Netflix 字幕助手播放器测试页</title>
+    <link rel="stylesheet" href="../src/content.css">
+    <style>
+      html, body { background: #070707; color: #fff; height: 100%; margin: 0; overflow: hidden; }
+      body { align-items: center; display: flex; font-family: system-ui, sans-serif; justify-content: center; }
+      video { background: linear-gradient(135deg, #272727, #090909); height: 100vh; object-fit: contain; width: 100vw; }
+      .fixture-title { left: 24px; opacity: .45; position: fixed; top: 20px; }
+    </style>
+    <script>
+      history.replaceState(null, "", "/watch/12345678");
+
+      const mockSettings = {};
+      const changeListeners = [];
+      globalThis.chrome = globalThis.chrome || {};
+      globalThis.chrome.storage = {
+        sync: {
+          async get(defaults) { return { ...defaults, ...mockSettings }; },
+          async set(values) {
+            Object.assign(mockSettings, values);
+            const changes = Object.fromEntries(Object.entries(values).map(([key, newValue]) => [key, { newValue }]));
+            changeListeners.forEach((listener) => listener(changes, "sync"));
+          }
+        },
+        onChanged: { addListener(listener) { changeListeners.push(listener); } }
+      };
+      globalThis.chrome.runtime = {
+        onMessage: { addListener() {} }
+      };
+    </script>
+  </head>
+  <body>
+    <div class="fixture-title">本地播放器界面测试</div>
+    <video></video>
+    <script src="../src/config.js"></script>
+    <script src="../src/subtitle-parser.js"></script>
+    <script src="../src/player-toolbar.js"></script>
+    <script src="../src/content.js"></script>
+  </body>
+</html>
