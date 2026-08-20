@@ -80,6 +80,27 @@ function makeIdReader(entries) {
   return (element) => new Set(ids.get(element) || []);
 }
 
+function makeVirtualRow(mountedCount, totalSlots = 20) {
+  const section = new FakeElement();
+  const track = new FakeElement();
+  const cards = Array.from({ length: mountedCount }, () => new FakeElement());
+  const spacers = Array.from(
+    { length: totalSlots - mountedCount },
+    () => new FakeElement({ width: 0, height: 0 })
+  );
+  const links = cards.map(() => new FakeElement({ tagName: "A" }));
+  cards.forEach((card, index) => card.append(links[index]));
+  section.append(track.append(...cards, ...spacers));
+
+  const entries = [];
+  cards.forEach((card, index) => {
+    const id = String(1000 + index);
+    entries.push([card, [id]], [links[index], [id]]);
+  });
+
+  return { section, track, cards, spacers, links, getIds: makeIdReader(entries) };
+}
+
 test("selects a verified Netflix slider item instead of its inner link", () => {
   const section = new FakeElement();
   const track = new FakeElement();
@@ -135,21 +156,7 @@ test("proves a repeated generic carousel only when card siblings dominate", () =
 });
 
 test("accepts a Netflix virtual row with 13 mounted cards and 7 unresolved slots", () => {
-  const section = new FakeElement();
-  const track = new FakeElement();
-  const cards = Array.from({ length: 13 }, () => new FakeElement());
-  const spacers = Array.from({ length: 7 }, () => new FakeElement({ width: 0, height: 0 }));
-  const links = cards.map(() => new FakeElement({ tagName: "A" }));
-  cards.forEach((card, index) => card.append(links[index]));
-  section.append(track.append(...cards, ...spacers));
-
-  const entries = [];
-  cards.forEach((card, index) => {
-    const id = String(1000 + index);
-    entries.push([card, [id]], [links[index], [id]]);
-  });
-
-  const getIds = makeIdReader(entries);
+  const { section, track, cards, spacers, links, getIds } = makeVirtualRow(13);
   links.forEach((link, index) => {
     assert.equal(cardLayout.findCardRoot(link, section, getIds), cards[index]);
   });
@@ -158,11 +165,30 @@ test("accepts a Netflix virtual row with 13 mounted cards and 7 unresolved slots
   });
 });
 
-test("rejects a row where canonical cards are only half of the children", () => {
+test("accepts sparse 20-slot virtual rows with 5, 6, or 8 rendered cards", () => {
+  for (const mountedCount of [5, 6, 8]) {
+    const { section, cards, spacers, links, getIds } = makeVirtualRow(mountedCount);
+    links.forEach((link, index) => {
+      assert.equal(
+        cardLayout.findCardRoot(link, section, getIds),
+        cards[index],
+        `${mountedCount}/20 row should select card ${index}`
+      );
+    });
+    spacers.forEach((spacer) => {
+      assert.equal(cardLayout.isRepeatedCardItem(spacer, spacer.parentElement, getIds), false);
+    });
+  }
+});
+
+test("rejects three canonical cards mixed with three visible non-card siblings", () => {
   const section = new FakeElement();
   const track = new FakeElement();
   const cards = Array.from({ length: 3 }, () => new FakeElement());
-  const unrelated = Array.from({ length: 3 }, () => new FakeElement());
+  const unrelated = Array.from(
+    { length: 3 },
+    () => new FakeElement({ width: 240, height: 135 })
+  );
   const links = cards.map(() => new FakeElement({ tagName: "A" }));
   cards.forEach((card, index) => card.append(links[index]));
   section.append(track.append(...cards, ...unrelated));

@@ -10,6 +10,7 @@
   const REQUEST_SOURCE = "nch-netflix-card-filter";
   const MAX_CAPTURED_SCRIPTS = 16;
   const MAX_SEED_PAIRS = 2_048;
+  const MAX_ACTIVE_IDS = MAX_SEED_PAIRS;
   const RETRY_DELAYS = [250, 750, 1_500, 3_000];
   const subscribers = new Set();
   const currentMap = new Map();
@@ -47,7 +48,7 @@
   function setActiveIds(ids) {
     const next = new Set(Array.from(ids || [])
       .filter((id) => typeof id === "string" && identity.isValidId(id))
-      .slice(0, identity.MAX_PAIRS));
+      .slice(0, MAX_ACTIVE_IDS));
     const changed = !sameIds(activeIds, next);
     activeIds = next;
 
@@ -295,7 +296,11 @@
     }
 
     activeEpoch += 1;
-    pendingRequestIds = Array.from(activeIds);
+    // The page bridge deliberately accepts only small, bounded requests. Keep
+    // every currently visible ID active so the larger inline bootstrap seed can
+    // still resolve it, while leaving IDs beyond the network batch unknown when
+    // no verified seed evidence exists.
+    pendingRequestIds = Array.from(activeIds).slice(0, identity.MAX_PAIRS);
     pendingRequestEpoch = activeEpoch;
     lastRequestedIds = new Set(activeIds);
     lastPostedEpoch = null;

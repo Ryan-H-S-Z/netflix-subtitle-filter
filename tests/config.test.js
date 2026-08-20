@@ -50,6 +50,31 @@ test("recognizes every supported Netflix card browsing route", () => {
   ]) {
     assert.equal(config.isCardFilterPath(path), false, path);
   }
+
+  assert.equal(config.isCardFilterPath("/", true), true);
+  assert.equal(config.isCardFilterPath("", true), true);
+  assert.equal(config.isCardFilterPath("/login", true), false);
+  assert.equal(config.isCardFilterPath("/browse/subtitles", true), false);
+});
+
+test("requires a high-confidence member surface before activating the root homepage", () => {
+  assert.equal(config.isMemberCardSurface(), false);
+  assert.equal(config.isMemberCardSurface({ cardLinkCount: 1 }), false);
+  assert.equal(config.isMemberCardSurface({ cardLinkCount: 2 }), false);
+  assert.equal(config.isMemberCardSurface({ hasMemberBootstrap: true, cardLinkCount: 1 }), false);
+  assert.equal(config.isMemberCardSurface({ hasMemberBootstrap: true, cardLinkCount: 2 }), true);
+  assert.equal(config.isMemberCardSurface({ hasMemberNavigation: true }), true);
+});
+
+test("uses bounded catalog retry delays and never identifies AbortError as retryable", () => {
+  assert.deepEqual(config.CATALOG_RETRY_DELAYS_MS, [1000, 3000, 8000]);
+  assert.equal(config.catalogRetryDelay(0), 1000);
+  assert.equal(config.catalogRetryDelay(2), 8000);
+  assert.equal(config.catalogRetryDelay(3), null);
+  assert.equal(config.catalogRetryDelay(-1), null);
+  assert.equal(config.catalogRetryDelay(1.5), null);
+  assert.equal(config.isAbortError({ name: "AbortError" }), true);
+  assert.equal(config.isAbortError(new Error("network")), false);
 });
 
 test("promotes watch IDs only on the exact movie-only route", () => {

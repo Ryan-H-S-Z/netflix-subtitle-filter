@@ -568,6 +568,15 @@
     };
   }
 
+  function normalizeLanguageLoadError(error, timedOut = false) {
+    if (!timedOut || error?.name !== "AbortError") {
+      return error;
+    }
+    const timeoutError = new Error("字幕目录读取超时，已暂时保留未知影片");
+    timeoutError.name = "TimeoutError";
+    return timeoutError;
+  }
+
   async function waitForFreshRecord(item, generation, refreshAt, signal, maxWaitMs) {
     const deadline = Date.now() + maxWaitMs;
     while (!signal?.aborted && Date.now() < deadline) {
@@ -826,6 +835,7 @@
           ) {
             return;
           }
+          const failure = normalizeLanguageLoadError(error, bounded.timedOut());
           if (item.staleRecord) {
             indexes[item.code] = {
               ids: new Set(item.staleRecord.ids),
@@ -835,7 +845,7 @@
               builtAt: item.staleRecord.builtAt,
               cached: true,
               stale: true,
-              error: error?.message || "字幕目录读取失败"
+              error: failure?.message || "字幕目录读取失败"
             };
           } else {
             indexes[item.code] = {
@@ -843,10 +853,10 @@
               titles: new Set(),
               complete: false,
               titlesComplete: false,
-              error: error?.message || "字幕目录读取失败"
+              error: failure?.message || "字幕目录读取失败"
             };
           }
-          options.onLanguageError?.({ code: item.code, error });
+          options.onLanguageError?.({ code: item.code, error: failure });
         } finally {
           leaseHeartbeat.stop();
           bounded.cleanup();
@@ -900,6 +910,7 @@
     pruneCache,
     cacheRecordStorageKey,
     cacheNeedsAutoRefresh,
+    normalizeLanguageLoadError,
     preserveStalePositiveTitles,
     cacheRecordToIndex,
     fetchLanguageIndex,

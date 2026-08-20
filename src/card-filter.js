@@ -10,6 +10,18 @@
   const cardLayout = globalThis.NetflixSubtitleCardLayout;
   const HOST_ID = "nch-card-filter-host";
   const CARD_LINK_SELECTOR = 'a[href*="jbv="], a[href*="/watch/"], a[href*="/title/"]';
+  const MEMBER_SURFACE_SELECTOR = [
+    ".lolomo",
+    ".lolomoRow",
+    '[data-uia="slider"]',
+    '[data-uia="billboard"]',
+    '[data-uia="member-header"]',
+    ".pinning-header .secondary-navigation",
+    ".main-header .secondary-navigation",
+    ".account-dropdown-button",
+    'a[href="/browse/my-list"]'
+  ].join(", ");
+  let memberBootstrapDetected = false;
 
   if (
     !config
@@ -44,6 +56,7 @@
     loading: false,
     cacheMode: "none",
     abortController: null,
+    retryTimer: null,
     storageRebuildTimer: null,
     cacheRebuildTimer: null,
     suppressFilterSignature: null,
@@ -96,8 +109,28 @@
   const statusText = statusShadow.getElementById("status-text");
   document.documentElement.appendChild(statusHost);
 
+  function hasMemberBootstrap() {
+    if (memberBootstrapDetected) {
+      return true;
+    }
+    memberBootstrapDetected = Array.from(document.scripts || []).some((script) => {
+      const text = !script.src && typeof script.textContent === "string"
+        ? script.textContent
+        : "";
+      return text.includes('"authURL"')
+        && text.includes('"currentCountry"')
+        && /"user":"user:(?:\\x20|\s)*((?:\\.|[^"\\])+?)"/.test(text);
+    });
+    return memberBootstrapDetected;
+  }
+
   function isCardRoute() {
-    return config.isCardFilterPath(location.pathname);
+    const hasMemberSurface = location.pathname === "/" && config.isMemberCardSurface({
+      hasMemberNavigation: Boolean(document.querySelector(MEMBER_SURFACE_SELECTOR)),
+      hasMemberBootstrap: hasMemberBootstrap(),
+      cardLinkCount: document.querySelectorAll(CARD_LINK_SELECTOR).length
+    });
+    return config.isCardFilterPath(location.pathname, hasMemberSurface);
   }
 
   function t(key, values) {
@@ -357,6 +390,13 @@
   }
 
   const observer = new MutationObserver((records) => {
+    const nextRouteActive = isCardRoute();
+    if (nextRouteActive !== state.routeActive) {
+      state.routeActive = nextRouteActive;
+      rebuildIndexes();
+      return;
+    }
+
     const relevant = records.some((record) => {
       if (record.type === "attributes") {
         return record.target instanceof Element
@@ -373,7 +413,37 @@
     }
   });
 
-  async function rebuildIndexes({ force = false } = {}) {
+  function completeFailedLoad({ indexes = {}, errors = [], retryAttempt = 0 } = {}) {
+    state.indexes = indexes;
+    state.loading = false;
+    state.cacheMode = "none";
+    observer.disconnect();
+    applyFilter();
+    observeDom();
+
+    const wasAborted = errors.some((error) => config.isAbortError(error));
+    const delay = wasAborted ? null : config.catalogRetryDelay(retryAttempt);
+    if (delay == null) {
+      setStatus("error", t("filterStatusError"));
+      return;
+    }
+
+    setStatus("error", t("filterStatusRetrying", {
+      seconds: Math.ceil(delay / 1000),
+      attempt: retryAttempt + 1,
+      max: config.CATALOG_RETRY_DELAYS_MS.length
+    }));
+    state.retryTimer = window.setTimeout(() => {
+      state.retryTimer = null;
+      if (state.filter.enabled && isCardRoute()) {
+        rebuildIndexes({ retryAttempt: retryAttempt + 1 });
+      }
+    }, delay);
+  }
+
+  async function rebuildIndexes({ force = false, retryAttempt = 0 } = {}) {
+    window.clearTimeout(state.retryTimer);
+    state.retryTimer = null;
     state.abortController?.abort();
     const abortController = new AbortController();
     state.abortController = abortController;
@@ -384,7 +454,8 @@
     state.cacheMode = "none";
     scheduleApply();
 
-    if (!state.filter.enabled || !isCardRoute()) {
+    state.routeActive = isCardRoute();
+    if (!state.filter.enabled || !state.routeActive) {
       setStatus("disabled", "");
       return statusSnapshot({ started: false });
     }
@@ -392,6 +463,7 @@
     const selected = rules.getSelectedLanguages(state.filter);
     const ready = new Set();
     const cached = new Set();
+    const languageErrors = [];
     state.loading = true;
     setStatus("loading", t("pageLoadingCatalogs", { ready: 0, total: selected.length }));
 
@@ -420,8 +492,9 @@
             }));
           }
         },
-        onLanguageError: ({ code }) => {
+        onLanguageError: ({ code, error }) => {
           ready.add(code);
+          languageErrors.push(error);
         }
       });
 
@@ -434,16 +507,15 @@
       state.cacheMode = selected.length > 0 && cached.size === selected.length
         ? "cached"
         : "updated";
+      if (languageErrors.length) {
+        completeFailedLoad({ indexes, errors: languageErrors, retryAttempt });
+        return statusSnapshot();
+      }
       scheduleApply();
       return statusSnapshot();
     } catch (error) {
       if (state.loadSequence === sequence) {
-        state.indexes = {};
-        state.loading = false;
-        observer.disconnect();
-        applyFilter();
-        observeDom();
-        setStatus("error", t("filterStatusError"));
+        completeFailedLoad({ errors: [error], retryAttempt });
       }
       return statusSnapshot();
     }
@@ -587,6 +659,8 @@
     const nextRouteActive = isCardRoute();
     if (nextRouteActive !== state.routeActive) {
       state.routeActive = nextRouteActive;
+      rebuildIndexes();
+    } else if (nextRouteActive && state.status.phase === "error") {
       rebuildIndexes();
     } else {
       scheduleApply();

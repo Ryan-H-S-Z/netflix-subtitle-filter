@@ -265,6 +265,15 @@ test("decodes Netflix inline-script escape sequences without evaluating code", (
   );
 });
 
+test("distinguishes an internal catalog timeout from a user-initiated abort", () => {
+  const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
+  assert.equal(catalog.normalizeLanguageLoadError(abortError, false), abortError);
+
+  const timeoutError = catalog.normalizeLanguageLoadError(abortError, true);
+  assert.equal(timeoutError.name, "TimeoutError");
+  assert.match(timeoutError.message, /超时/);
+});
+
 test("keeps complete cache records until manual refresh for the same profile scope", () => {
   const now = Date.now();
   const record = {

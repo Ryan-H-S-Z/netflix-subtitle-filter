@@ -52,16 +52,21 @@
       return false;
     }
 
-    const cardLike = children.filter((child) => hasSingleId(child, getIds));
+    // Netflix virtualizes carousel tracks by leaving unmounted slots in the
+    // child list. Those slots have no rendered area and must not dilute the
+    // card ratio; visible non-card siblings still count against it.
+    const renderedChildren = children.filter((child) => {
+      const rect = child.getBoundingClientRect?.();
+      return !rect || (rect.width > 0 && rect.height > 0);
+    });
+    const cardLike = renderedChildren.filter((child) => hasSingleId(child, getIds));
     const distinctIds = new Set(cardLike.flatMap((child) => [...getIds(child)]));
     if (
       cardLike.length < 3
       || distinctIds.size < 3
-      // Netflix keeps unresolved/virtual spacer slots in the same track. In
-      // the current browser UI a 20-slot row commonly has 13 mounted cards,
-      // so requiring 70% rejects every real card. Sixty percent still needs
-      // a clear majority plus the distinct-ID and size checks below.
-      || cardLike.length / children.length < 0.6
+      // Sixty percent still requires a clear majority among actually rendered
+      // siblings, in addition to the distinct-ID and size checks below.
+      || cardLike.length / renderedChildren.length < 0.6
       || !hasSingleId(candidate, getIds)
     ) {
       return false;

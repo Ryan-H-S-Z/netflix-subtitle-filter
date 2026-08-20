@@ -73,6 +73,7 @@
   const WEEKLY_CACHE_REFRESH_KEY = "weeklyCacheRefresh";
   const CATALOG_LAST_AUTO_REFRESH_KEY = "nchCatalogLastAutoRefreshAt";
   const CATALOG_AUTO_REFRESH_TICK_KEY = "nchCatalogAutoRefreshTick";
+  const CATALOG_RETRY_DELAYS_MS = Object.freeze([1000, 3000, 8000]);
 
   function getLanguage(code) {
     return LANGUAGES[code] || LANGUAGES[DEFAULT_SETTINGS.preferredLanguage];
@@ -94,12 +95,35 @@
     }
   }
 
-  function isCardFilterPath(pathname) {
+  function isCardFilterPath(pathname, hasMemberSurface = false) {
     const path = String(pathname || "");
     if (/^\/browse\/subtitles(?:\/|$)/.test(path)) {
       return false;
     }
+    if (/^\/?$/.test(path)) {
+      return hasMemberSurface === true;
+    }
     return /^\/(?:browse|latest|search|title)(?:\/|$)/.test(path);
+  }
+
+  function isMemberCardSurface({
+    hasMemberNavigation = false,
+    hasMemberBootstrap = false,
+    cardLinkCount = 0
+  } = {}) {
+    return hasMemberNavigation === true
+      || (hasMemberBootstrap === true && Number(cardLinkCount) >= 2);
+  }
+
+  function catalogRetryDelay(attempt) {
+    const index = Number(attempt);
+    return Number.isInteger(index) && index >= 0
+      ? CATALOG_RETRY_DELAYS_MS[index] ?? null
+      : null;
+  }
+
+  function isAbortError(error) {
+    return error?.name === "AbortError";
   }
 
   function isMovieOnlyPath(pathname) {
@@ -123,10 +147,14 @@
     WEEKLY_CACHE_REFRESH_KEY,
     CATALOG_LAST_AUTO_REFRESH_KEY,
     CATALOG_AUTO_REFRESH_TICK_KEY,
+    CATALOG_RETRY_DELAYS_MS,
     getLanguage,
     getFilterUrl,
     isNetflixUrl,
     isCardFilterPath,
+    isMemberCardSurface,
+    catalogRetryDelay,
+    isAbortError,
     isMovieOnlyPath,
     normalizeTitle
   });

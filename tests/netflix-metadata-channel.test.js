@@ -195,3 +195,57 @@ test("captures a removed inline bootstrap script and exposes only its verified a
   assert.deepEqual(Object.fromEntries(harness.channel.getMap()), { "2000": "1000" });
   assert.equal(harness.context.__nchShouldNeverRun, undefined);
 });
+
+test("keeps 300 active IDs for inline seeds without widening bridge messages", () => {
+  const videos = {};
+  const ids = [];
+  for (let index = 0; index < 300; index += 1) {
+    const id = String(10_000 + index);
+    ids.push(id);
+    videos[id] = {
+      summary: { $type: "atom", value: { type: "movie", id: Number(id) } }
+    };
+  }
+
+  const script = {
+    tagName: "SCRIPT",
+    parentElement: null,
+    getAttribute() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+    textContent: `window.netflix.falcorCache = ${JSON.stringify({ videos })};`
+  };
+  const harness = createHarness({ scripts: [script] });
+
+  harness.channel.request(ids);
+  const seededMap = harness.channel.getMap();
+  assert.equal(seededMap.size, 300);
+  assert.equal(seededMap.get(ids[128]), ids[128], "the 129th active ID must retain seed evidence");
+  assert.equal(seededMap.get(ids.at(-1)), ids.at(-1));
+
+  harness.runUntil(() => harness.messages.length === 1);
+  const firstEpoch = harness.messages[0].epoch;
+  assert.equal(harness.messages[0].ids.length, identity.MAX_PAIRS);
+  assert.ok(harness.messages.every((message) => message.ids.length <= identity.MAX_PAIRS));
+
+  harness.channel.request(["9000"]);
+  assert.deepEqual(Object.fromEntries(harness.channel.getMap()), {}, "leaving the page clears old seed mappings");
+  harness.runUntil(() => harness.messages.length === 2);
+  harness.dispatchBridge({
+    epoch: firstEpoch,
+    pairs: [["9000", "9999"]]
+  });
+  assert.deepEqual(
+    Object.fromEntries(harness.channel.getMap()),
+    {},
+    "a response from the previous active-ID epoch must not pollute the new page"
+  );
+  assert.ok(harness.messages.every((message) => message.ids.length <= identity.MAX_PAIRS));
+
+  const currentEpoch = harness.messages.at(-1).epoch;
+  harness.dispatchBridge({ epoch: currentEpoch });
+  harness.drainTimers();
+});
