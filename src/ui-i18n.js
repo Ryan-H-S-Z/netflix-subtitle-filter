@@ -390,6 +390,56 @@
     }
   }
 
+  function languageBadgePresentation(locale, codes) {
+    const normalizedLocale = normalizeUiLanguage(locale);
+    const normalizedCodes = Array.from(new Set(Array.from(codes || [])
+      .map((code) => String(code || "").toLowerCase())
+      .filter(Boolean)));
+    const labels = normalizedCodes
+      .map((code) => languageName(normalizedLocale, code, { short: true }))
+      .filter(Boolean);
+    const text = labels.join(" · ");
+    return {
+      codes: normalizedCodes,
+      lang: UI_LANGUAGE_TAGS[normalizedLocale],
+      text,
+      title: text ? t(normalizedLocale, "pageConfirmedSubtitles", { languages: text }) : ""
+    };
+  }
+
+  function createUiLanguageController(initialValue = DEFAULT_UI_LANGUAGE, onChange = () => {}) {
+    let value = normalizeUiLanguage(initialValue);
+    let revision = 0;
+
+    function apply(nextValue) {
+      const next = normalizeUiLanguage(nextValue);
+      const previous = value;
+      value = next;
+      revision += 1;
+      const changed = next !== previous;
+      if (changed && typeof onChange === "function") {
+        onChange(next, previous);
+      }
+      return { applied: true, changed, revision, value };
+    }
+
+    return Object.freeze({
+      get value() {
+        return value;
+      },
+      get revision() {
+        return revision;
+      },
+      apply,
+      hydrate(nextValue, expectedRevision) {
+        if (revision !== expectedRevision) {
+          return { applied: false, changed: false, revision, value };
+        }
+        return apply(nextValue);
+      }
+    });
+  }
+
   function messageKeys(locale) {
     return Object.keys(messages[normalizeUiLanguage(locale)]).sort();
   }
@@ -400,6 +450,8 @@
     normalizeUiLanguage,
     t,
     languageName,
+    languageBadgePresentation,
+    createUiLanguageController,
     messageKeys
   });
 });

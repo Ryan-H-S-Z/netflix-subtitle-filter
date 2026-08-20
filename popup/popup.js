@@ -476,13 +476,16 @@
       return;
     }
     try {
+      const saveUiLanguage = chrome.storage.sync.set({
+        uiLanguage: requestedUiLanguage
+      });
       uiLanguage = requestedUiLanguage;
       uiLanguageSelect.value = uiLanguage;
       applyStaticTranslations();
       updateFilterStateLabel();
       renderGroups();
+      await saveUiLanguage;
       await updateWeeklyRefreshHint();
-      await chrome.storage.sync.set({ uiLanguage });
       setStatus(t("uiLanguageSaved"));
     } catch (_error) {
       uiLanguage = previousUiLanguage;

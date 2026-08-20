@@ -28,7 +28,7 @@
 ### 从 GitHub Release 下载
 
 1. 打开 [最新版本下载页](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/releases/latest)。
-2. 在 **Assets** 中下载 `netflix-home-subtitle-filter-v1.0.1.zip`，然后解压。
+2. 在 **Assets** 中下载 `netflix-home-subtitle-filter-v1.0.2.zip`，然后解压。
 3. 在 Chrome 地址栏打开 `chrome://extensions/`。
 4. 打开右上角的“开发者模式”。
 5. 点击“加载已解压的扩展程序”，选择刚才解压出的文件夹。

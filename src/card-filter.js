@@ -31,6 +31,8 @@
     || !videoIdentity
     || !metadataChannel
     || !cardLayout
+    || typeof uiI18n.languageBadgePresentation !== "function"
+    || typeof uiI18n.createUiLanguageController !== "function"
     || document.getElementById(HOST_ID)
   ) {
     return;
@@ -52,6 +54,7 @@
       hidden: 0,
       unknown: 0
     },
+    statusLocalization: null,
     renderScheduled: false,
     loading: false,
     cacheMode: "none",
@@ -63,6 +66,14 @@
     localCacheRefreshActive: false,
     selfRefreshGeneration: null
   };
+  const uiLanguageController = uiI18n.createUiLanguageController(
+    state.uiLanguage,
+    (nextLanguage) => {
+      state.uiLanguage = nextLanguage;
+      relocalizeBadges();
+      relocalizeStatus();
+    }
+  );
 
   const statusHost = document.createElement("div");
   statusHost.id = HOST_ID;
@@ -142,6 +153,7 @@
   }
 
   function setStatus(phase, text, counts = {}) {
+    state.statusLocalization = null;
     Object.assign(state.status, counts, { phase, text });
     statusHost.dataset.nchPhase = phase;
     statusHost.dataset.nchTotal = String(state.status.total || 0);
@@ -151,6 +163,40 @@
     statusElement.dataset.phase = phase;
     statusText.textContent = text;
     statusElement.hidden = phase === "disabled" || !isCardRoute();
+  }
+
+  function setLocalizedStatus(
+    phase,
+    key,
+    valuesOrFactory = {},
+    counts = {},
+    suffixKey = ""
+  ) {
+    const values = typeof valuesOrFactory === "function"
+      ? valuesOrFactory()
+      : valuesOrFactory;
+    setStatus(phase, `${t(key, values)}${suffixKey ? t(suffixKey) : ""}`, counts);
+    state.statusLocalization = {
+      phase,
+      key,
+      valuesOrFactory,
+      counts: { ...counts },
+      suffixKey
+    };
+  }
+
+  function relocalizeStatus() {
+    const localization = state.statusLocalization;
+    if (!localization) {
+      return;
+    }
+    setLocalizedStatus(
+      localization.phase,
+      localization.key,
+      localization.valuesOrFactory,
+      localization.counts,
+      localization.suffixKey
+    );
   }
 
   function statusSnapshot(extra = {}) {
@@ -294,20 +340,40 @@
       return;
     }
 
-    const labels = languageCodes
-      .map((code) => languageLabel(code, true))
-      .filter(Boolean);
-    if (!labels.length) {
+    const presentation = uiI18n.languageBadgePresentation(state.uiLanguage, languageCodes);
+    if (!presentation.text) {
       return;
     }
 
     const badge = document.createElement("span");
     badge.dataset.nchLanguageBadge = "true";
+    badge.dataset.nchLanguageCodes = presentation.codes.join(",");
     badge.className = "nch-card-filter-badge";
-    badge.textContent = labels.join(" · ");
-    badge.title = t("pageConfirmedSubtitles", { languages: labels.join(" · ") });
+    badge.lang = presentation.lang;
+    badge.textContent = presentation.text;
+    badge.title = presentation.title;
     badge.setAttribute("aria-hidden", "true");
     root.appendChild(badge);
+  }
+
+  function relocalizeBadges() {
+    for (const badge of document.querySelectorAll("[data-nch-language-badge]")) {
+      const codes = String(badge.dataset.nchLanguageCodes || "")
+        .split(",")
+        .filter(Boolean);
+      const presentation = uiI18n.languageBadgePresentation(state.uiLanguage, codes);
+      if (!presentation.text) {
+        badge.remove();
+        continue;
+      }
+      badge.lang = presentation.lang;
+      badge.textContent = presentation.text;
+      badge.title = presentation.title;
+    }
+  }
+
+  function applyUiLanguage(value) {
+    return uiLanguageController.apply(value);
   }
 
   function applyFilter() {
@@ -346,15 +412,26 @@
     }
 
     const counts = { total: cards.length, matched, hidden, unknown };
-    const cacheSuffix = state.cacheMode === "cached" ? t("pageCachedSuffix") : "";
     if (state.loading) {
       Object.assign(state.status, counts);
     } else if (!cards.length && collection.candidateCount) {
-      setStatus("partial", t("pageNoIdentity"), counts);
+      setLocalizedStatus("partial", "pageNoIdentity", {}, counts);
     } else if (unknown) {
-      setStatus("partial", `${t("filterStatusPartial", { matched, unknown })}${cacheSuffix}`, counts);
+      setLocalizedStatus(
+        "partial",
+        "filterStatusPartial",
+        { matched, unknown },
+        counts,
+        state.cacheMode === "cached" ? "pageCachedSuffix" : ""
+      );
     } else {
-      setStatus("ready", `${t("filterStatusReady", { matched, total: cards.length })}${cacheSuffix}`, counts);
+      setLocalizedStatus(
+        "ready",
+        "filterStatusReady",
+        { matched, total: cards.length },
+        counts,
+        state.cacheMode === "cached" ? "pageCachedSuffix" : ""
+      );
     }
   }
 
@@ -424,15 +501,15 @@
     const wasAborted = errors.some((error) => config.isAbortError(error));
     const delay = wasAborted ? null : config.catalogRetryDelay(retryAttempt);
     if (delay == null) {
-      setStatus("error", t("filterStatusError"));
+      setLocalizedStatus("error", "filterStatusError");
       return;
     }
 
-    setStatus("error", t("filterStatusRetrying", {
+    setLocalizedStatus("error", "filterStatusRetrying", {
       seconds: Math.ceil(delay / 1000),
       attempt: retryAttempt + 1,
       max: config.CATALOG_RETRY_DELAYS_MS.length
-    }));
+    });
     state.retryTimer = window.setTimeout(() => {
       state.retryTimer = null;
       if (state.filter.enabled && isCardRoute()) {
@@ -465,7 +542,7 @@
     const cached = new Set();
     const languageErrors = [];
     state.loading = true;
-    setStatus("loading", t("pageLoadingCatalogs", { ready: 0, total: selected.length }));
+    setLocalizedStatus("loading", "pageLoadingCatalogs", { ready: 0, total: selected.length });
 
     try {
       const indexes = await catalog.loadIndexes(selected, {
@@ -473,9 +550,8 @@
         signal: abortController.signal,
         onProgress: ({ code, loaded }) => {
           if (state.loadSequence === sequence) {
-            const label = languageLabel(code, true);
-            setStatus("loading", t("pageLoadingLanguage", {
-              language: label,
+            setLocalizedStatus("loading", "pageLoadingLanguage", () => ({
+              language: languageLabel(code, true),
               count: loaded.toLocaleString(uiI18n.UI_LANGUAGE_TAGS[state.uiLanguage])
             }));
           }
@@ -486,10 +562,10 @@
             cached.add(code);
           }
           if (state.loadSequence === sequence) {
-            setStatus("loading", t("pageLoadingCatalogs", {
+            setLocalizedStatus("loading", "pageLoadingCatalogs", {
               ready: ready.size,
               total: selected.length
-            }));
+            });
           }
         },
         onLanguageError: ({ code, error }) => {
@@ -558,8 +634,7 @@
       return;
     }
     if (changes.uiLanguage) {
-      state.uiLanguage = uiI18n.normalizeUiLanguage(changes.uiLanguage.newValue);
-      scheduleApply();
+      applyUiLanguage(changes.uiLanguage.newValue);
     }
     if (!changes.cardFilter) {
       return;
@@ -672,11 +747,12 @@
     scheduleApply();
   });
   observeDom();
+  const initialUiLanguageRevision = uiLanguageController.revision;
   chrome.storage.sync.get({
     cardFilter: rules.DEFAULT_CARD_FILTER,
     uiLanguage: uiI18n.DEFAULT_UI_LANGUAGE
   }).then(({ cardFilter, uiLanguage }) => {
-    state.uiLanguage = uiI18n.normalizeUiLanguage(uiLanguage);
+    uiLanguageController.hydrate(uiLanguage, initialUiLanguageRevision);
     state.filter = rules.normalizeFilter(cardFilter);
     rebuildIndexes();
   });

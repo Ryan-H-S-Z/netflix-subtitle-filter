@@ -31,3 +31,49 @@ test("localizes common full and short subtitle language names", () => {
   assert.equal(i18n.languageName("en", "zh-hant", { short: true }), "Trad. Chinese");
   assert.equal(i18n.languageName("en", "th"), "Thai");
 });
+
+test("builds card badge text and title in the selected interface language", () => {
+  assert.deepEqual(
+    i18n.languageBadgePresentation("zh-hans", ["zh-hans", "en"]),
+    {
+      codes: ["zh-hans", "en"],
+      lang: "zh-CN",
+      text: "简中 · 英文",
+      title: "已确认字幕：简中 · 英文"
+    }
+  );
+  assert.deepEqual(
+    i18n.languageBadgePresentation("zh-hant", ["zh-hans", "en"]),
+    {
+      codes: ["zh-hans", "en"],
+      lang: "zh-TW",
+      text: "簡中 · 英文",
+      title: "已確認字幕：簡中 · 英文"
+    }
+  );
+  assert.deepEqual(
+    i18n.languageBadgePresentation("en", ["zh-hans", "en"]),
+    {
+      codes: ["zh-hans", "en"],
+      lang: "en",
+      text: "Simpl. Chinese · English",
+      title: "Confirmed subtitles: Simpl. Chinese · English"
+    }
+  );
+});
+
+test("keeps a newer language change when an older initial read finishes later", () => {
+  const changes = [];
+  const controller = i18n.createUiLanguageController("zh-hans", (next) => changes.push(next));
+  const initialRevision = controller.revision;
+
+  assert.equal(controller.apply("en").value, "en");
+  assert.equal(controller.hydrate("zh-hans", initialRevision).applied, false);
+  assert.equal(controller.value, "en");
+  assert.deepEqual(changes, ["en"]);
+
+  const currentRevision = controller.revision;
+  assert.equal(controller.hydrate("zh-hant", currentRevision).applied, true);
+  assert.equal(controller.value, "zh-hant");
+  assert.deepEqual(changes, ["en", "zh-hant"]);
+});
