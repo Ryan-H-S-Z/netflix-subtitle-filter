@@ -196,7 +196,7 @@ test("captures a removed inline bootstrap script and exposes only its verified a
   assert.equal(harness.context.__nchShouldNeverRun, undefined);
 });
 
-test("keeps 300 active IDs for inline seeds without widening bridge messages", () => {
+test("keeps 300 active IDs for inline seeds and sends the full bounded request", () => {
   const videos = {};
   const ids = [];
   for (let index = 0; index < 300; index += 1) {
@@ -228,8 +228,7 @@ test("keeps 300 active IDs for inline seeds without widening bridge messages", (
 
   harness.runUntil(() => harness.messages.length === 1);
   const firstEpoch = harness.messages[0].epoch;
-  assert.equal(harness.messages[0].ids.length, identity.MAX_PAIRS);
-  assert.ok(harness.messages.every((message) => message.ids.length <= identity.MAX_PAIRS));
+  assert.deepEqual([...harness.messages[0].ids], ids);
 
   harness.channel.request(["9000"]);
   assert.deepEqual(Object.fromEntries(harness.channel.getMap()), {}, "leaving the page clears old seed mappings");
@@ -243,9 +242,43 @@ test("keeps 300 active IDs for inline seeds without widening bridge messages", (
     {},
     "a response from the previous active-ID epoch must not pollute the new page"
   );
-  assert.ok(harness.messages.every((message) => message.ids.length <= identity.MAX_PAIRS));
+  assert.ok(harness.messages.every((message) => message.ids.length <= 2_048));
 
   const currentEpoch = harness.messages.at(-1).epoch;
   harness.dispatchBridge({ epoch: currentEpoch });
   harness.drainTimers();
+});
+
+test("merges every chunked response for 300 active IDs in one epoch", () => {
+  const harness = createHarness();
+  const ids = Array.from({ length: 300 }, (_, index) => String(20_000 + index));
+
+  harness.channel.request(ids);
+  harness.runUntil(() => harness.messages.length === 1);
+  const request = harness.messages[0];
+  assert.deepEqual([...request.ids], ids);
+
+  for (let offset = 0; offset < ids.length; offset += identity.MAX_PAIRS) {
+    const batch = ids.slice(offset, offset + identity.MAX_PAIRS);
+    harness.dispatchBridge({
+      epoch: request.epoch,
+      pairs: batch.map((id) => [id, id])
+    });
+  }
+  harness.drainTimers();
+
+  const map = harness.channel.getMap();
+  assert.equal(map.size, ids.length);
+  assert.equal(map.get(ids[128]), ids[128]);
+  assert.equal(map.get(ids.at(-1)), ids.at(-1));
+});
+
+test("caps a hostile active ID set at the 2048-ID request boundary", () => {
+  const harness = createHarness();
+  const ids = Array.from({ length: 2_100 }, (_, index) => String(30_000 + index));
+
+  harness.channel.request(ids);
+  harness.runUntil(() => harness.messages.length === 1);
+
+  assert.equal(harness.messages[0].ids.length, 2_048);
 });

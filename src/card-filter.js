@@ -10,6 +10,14 @@
   const cardLayout = globalThis.NetflixSubtitleCardLayout;
   const HOST_ID = "nch-card-filter-host";
   const CARD_LINK_SELECTOR = 'a[href*="jbv="], a[href*="/watch/"], a[href*="/title/"]';
+  const CARD_TITLE_TEXT_SELECTOR = cardLayout?.TITLE_TEXT_SELECTORS?.join(",") || "";
+  const CARD_TITLE_IMAGE_SELECTOR = cardLayout?.TITLE_IMAGE_SELECTOR || "";
+  const TRUSTED_CARD_LINK_SELECTOR = cardLayout?.TRUSTED_CARD_LINK_SELECTORS?.join(",") || "";
+  const CARD_CONTENT_SIGNAL_SELECTOR = [
+    CARD_LINK_SELECTOR,
+    CARD_TITLE_TEXT_SELECTOR,
+    CARD_TITLE_IMAGE_SELECTOR
+  ].filter(Boolean).join(",");
   const MEMBER_SURFACE_SELECTOR = [
     ".lolomo",
     ".lolomoRow",
@@ -31,7 +39,9 @@
     || !videoIdentity
     || !metadataChannel
     || !cardLayout
+    || typeof cardLayout.extractCardTitle !== "function"
     || typeof uiI18n.languageBadgePresentation !== "function"
+    || typeof uiI18n.unsupportedBadgePresentation !== "function"
     || typeof uiI18n.createUiLanguageController !== "function"
     || document.getElementById(HOST_ID)
   ) {
@@ -52,6 +62,7 @@
       total: 0,
       matched: 0,
       hidden: 0,
+      marked: 0,
       unknown: 0
     },
     statusLocalization: null,
@@ -159,6 +170,7 @@
     statusHost.dataset.nchTotal = String(state.status.total || 0);
     statusHost.dataset.nchMatched = String(state.status.matched || 0);
     statusHost.dataset.nchHidden = String(state.status.hidden || 0);
+    statusHost.dataset.nchMarked = String(state.status.marked || 0);
     statusHost.dataset.nchUnknown = String(state.status.unknown || 0);
     statusElement.dataset.phase = phase;
     statusText.textContent = text;
@@ -228,7 +240,10 @@
     for (const link of cardLinksWithin(element)) {
       const identity = videoIdentity.idsFromHref(link.getAttribute("href") || link.href, location.href);
       identity.explicitIds.forEach((id) => explicitIds.add(id));
-      if (identity.watchId) {
+      // A Netflix link can contain both a canonical jbv/title ID and an
+      // episode watch ID. The explicit ID is authoritative for that link;
+      // counting both makes one homepage card look like a compound card.
+      if (!identity.explicitIds.length && identity.watchId) {
         watchIds.add(identity.watchId);
       }
     }
@@ -251,31 +266,10 @@
     );
   }
 
-  function extractCardTitle(root) {
-    const fallbackTitles = new Set(
-      Array.from(root.querySelectorAll(".fallback-text"))
-        .map((element) => config.normalizeTitle(element.textContent))
-        .filter(Boolean)
-    );
-    if (fallbackTitles.size !== 1) {
-      return "";
-    }
-
-    const fallbackTitle = Array.from(fallbackTitles)[0];
-    const ariaTitles = new Set(
-      cardLinksWithin(root)
-        .map((link) => config.normalizeTitle(link.getAttribute("aria-label")))
-        .filter(Boolean)
-    );
-    return ariaTitles.size === 1 && ariaTitles.has(fallbackTitle)
-      ? fallbackTitle
-      : "";
-  }
-
   function collectCards() {
     const cards = new Map();
     const identityCache = new WeakMap();
-    const requestedWatchIds = new Set();
+    const requestedStructuralIds = new Set();
     const links = document.querySelectorAll(CARD_LINK_SELECTOR);
 
     for (const link of links) {
@@ -283,11 +277,13 @@
         link.getAttribute("href") || link.href,
         location.href
       );
-      if (identity.watchId) {
-        requestedWatchIds.add(identity.watchId);
+      if (identity.explicitIds.length) {
+        identity.explicitIds.forEach((id) => requestedStructuralIds.add(id));
+      } else if (identity.watchId) {
+        requestedStructuralIds.add(identity.watchId);
       }
     }
-    metadataChannel.request(requestedWatchIds);
+    metadataChannel.request(requestedStructuralIds);
 
     for (const link of links) {
       const scope = resolveCardScope(link);
@@ -306,8 +302,13 @@
 
       const rootIdentity = identitiesWithin(root, identityCache);
       let titleId = null;
-      if (rootIdentity.explicitIds.size === 1) {
-        titleId = Array.from(rootIdentity.explicitIds)[0];
+      if (rootIdentity.explicitIds.size) {
+        const canonicalExplicitIds = new Set(
+          Array.from(rootIdentity.explicitIds, (id) => state.videoIdMap.get(id) || id)
+        );
+        if (canonicalExplicitIds.size === 1) {
+          titleId = Array.from(canonicalExplicitIds)[0];
+        }
       } else if (rootIdentity.explicitIds.size === 0 && rootIdentity.watchIds.size === 1) {
         const watchId = Array.from(rootIdentity.watchIds)[0];
         titleId = state.videoIdMap.get(watchId)
@@ -319,7 +320,11 @@
           root,
           scope,
           titleId,
-          title: extractCardTitle(root)
+          title: cardLayout.extractCardTitle(
+            root,
+            cardLinksWithin(root),
+            config.normalizeTitle
+          )
         });
       }
     }
@@ -329,9 +334,15 @@
 
   function clearAppliedState() {
     for (const element of document.querySelectorAll("[data-nch-card-filter-state]")) {
-      element.classList.remove("nch-card-filter-hidden", "nch-card-filter-match", "nch-card-filter-unknown");
+      element.classList.remove(
+        "nch-card-filter-hidden",
+        "nch-card-filter-match",
+        "nch-card-filter-marked",
+        "nch-card-filter-unknown"
+      );
       delete element.dataset.nchCardFilterState;
       element.querySelector(":scope > [data-nch-language-badge]")?.remove();
+      element.querySelector(":scope > [data-nch-unsupported-badge]")?.remove();
     }
   }
 
@@ -356,6 +367,18 @@
     root.appendChild(badge);
   }
 
+  function addUnsupportedBadge(root) {
+    const presentation = uiI18n.unsupportedBadgePresentation(state.uiLanguage);
+    const badge = document.createElement("span");
+    badge.dataset.nchUnsupportedBadge = "true";
+    badge.className = "nch-card-filter-badge nch-card-filter-unsupported-badge";
+    badge.lang = presentation.lang;
+    badge.textContent = presentation.text;
+    badge.title = presentation.title;
+    badge.setAttribute("aria-hidden", "true");
+    root.appendChild(badge);
+  }
+
   function relocalizeBadges() {
     for (const badge of document.querySelectorAll("[data-nch-language-badge]")) {
       const codes = String(badge.dataset.nchLanguageCodes || "")
@@ -366,6 +389,12 @@
         badge.remove();
         continue;
       }
+      badge.lang = presentation.lang;
+      badge.textContent = presentation.text;
+      badge.title = presentation.title;
+    }
+    for (const badge of document.querySelectorAll("[data-nch-unsupported-badge]")) {
+      const presentation = uiI18n.unsupportedBadgePresentation(state.uiLanguage);
       badge.lang = presentation.lang;
       badge.textContent = presentation.text;
       badge.title = presentation.title;
@@ -389,29 +418,43 @@
     const cards = collection.cards;
     let matched = 0;
     let hidden = 0;
+    let marked = 0;
     let unknown = 0;
 
     for (const card of cards) {
       const result = card.titleId
         ? rules.evaluateTitle(card.titleId, state.filter, state.indexes, card.title)
         : rules.evaluateTitle("", state.filter, state.indexes, card.title);
+      const display = rules.resolveCardDisplay(result.state, state.filter);
       card.root.dataset.nchCardFilterState = result.state;
 
-      if (result.state === rules.NO_MATCH) {
+      if (display.hidden) {
         card.root.classList.add("nch-card-filter-hidden");
         hidden += 1;
+      } else if (display.markUnsupported) {
+        card.root.classList.add("nch-card-filter-marked");
+        addUnsupportedBadge(card.root);
+        marked += 1;
       } else if (result.state === rules.MATCH) {
         card.root.classList.add("nch-card-filter-match");
-        addBadge(card.root, result.matchedLanguages);
+        if (display.showLanguageBadge) {
+          addBadge(card.root, result.matchedLanguages);
+        }
         matched += 1;
       } else {
         card.root.classList.add("nch-card-filter-unknown");
+        // An incomplete AND condition can still contain languages that were
+        // positively confirmed. Show that truthful partial evidence while the
+        // card itself remains visible under the fail-open policy.
+        if (display.showLanguageBadge) {
+          addBadge(card.root, result.matchedLanguages);
+        }
         unknown += 1;
       }
 
     }
 
-    const counts = { total: cards.length, matched, hidden, unknown };
+    const counts = { total: cards.length, matched, hidden, marked, unknown };
     if (state.loading) {
       Object.assign(state.status, counts);
     } else if (!cards.length && collection.candidateCount) {
@@ -419,16 +462,16 @@
     } else if (unknown) {
       setLocalizedStatus(
         "partial",
-        "filterStatusPartial",
-        { matched, unknown },
+        marked ? "filterStatusPartialMarked" : "filterStatusPartial",
+        { matched, marked, unknown },
         counts,
         state.cacheMode === "cached" ? "pageCachedSuffix" : ""
       );
     } else {
       setLocalizedStatus(
         "ready",
-        "filterStatusReady",
-        { matched, total: cards.length },
+        marked ? "filterStatusReadyMarked" : "filterStatusReady",
+        { matched, marked, total: cards.length },
         counts,
         state.cacheMode === "cached" ? "pageCachedSuffix" : ""
       );
@@ -439,8 +482,9 @@
     observer.observe(document.body || document.documentElement, {
       subtree: true,
       childList: true,
+      characterData: true,
       attributes: true,
-      attributeFilter: ["href"],
+      attributeFilter: ["href", "aria-label", "alt", "data-uia"],
       attributeOldValue: true
     });
   }
@@ -458,10 +502,13 @@
     });
   }
 
-  function containsCardLink(node) {
+  function containsCardContentSignal(node) {
+    if (node?.nodeType === 3) {
+      return Boolean(node.parentElement?.matches?.(CARD_TITLE_TEXT_SELECTOR));
+    }
     return node instanceof Element && (
-      node.matches(CARD_LINK_SELECTOR)
-      || Boolean(node.querySelector(CARD_LINK_SELECTOR))
+      node.matches(CARD_CONTENT_SIGNAL_SELECTOR)
+      || Boolean(node.querySelector(CARD_CONTENT_SIGNAL_SELECTOR))
       || node.hasAttribute("data-nch-card-filter-state")
     );
   }
@@ -476,14 +523,44 @@
 
     const relevant = records.some((record) => {
       if (record.type === "attributes") {
-        return record.target instanceof Element
-          && record.target.tagName === "A"
-          && (
-            record.target.matches(CARD_LINK_SELECTOR)
-            || /(?:jbv=|\/watch\/|\/title\/)/.test(record.oldValue || "")
-          );
+        if (!(record.target instanceof Element)) {
+          return false;
+        }
+        if (record.attributeName === "href") {
+          return record.target.tagName === "A"
+            && (
+              record.target.matches(CARD_LINK_SELECTOR)
+              || /(?:jbv=|\/watch\/|\/title\/)/.test(record.oldValue || "")
+            );
+        }
+        if (record.attributeName === "aria-label") {
+          return record.target.tagName === "A" && record.target.matches(CARD_LINK_SELECTOR);
+        }
+        if (record.attributeName === "data-uia") {
+          return record.target.tagName === "A"
+            && record.target.matches(CARD_LINK_SELECTOR)
+            && (
+              Boolean(TRUSTED_CARD_LINK_SELECTOR && record.target.matches(TRUSTED_CARD_LINK_SELECTOR))
+              || /^(?:standard|progress|ranked)-card$/.test(record.oldValue || "")
+            );
+        }
+        return record.attributeName === "alt"
+          && record.target.tagName === "IMG"
+          && Boolean(record.target.closest("[data-nch-card-filter-state]"));
       }
-      return [...record.addedNodes, ...record.removedNodes].some(containsCardLink);
+      if (record.type === "characterData") {
+        return Boolean(record.target.parentElement?.matches?.(CARD_TITLE_TEXT_SELECTOR));
+      }
+      return (
+        record.target instanceof Element
+        && (
+          record.target.matches(CARD_TITLE_TEXT_SELECTOR)
+          // Netflix may reconcile a card after we append a badge and remove
+          // that foreign child. Re-apply when a managed root's direct
+          // children change so the selected language/red badge is restored.
+          || record.target.hasAttribute("data-nch-card-filter-state")
+        )
+      ) || [...record.addedNodes, ...record.removedNodes].some(containsCardContentSignal);
     });
     if (relevant) {
       scheduleApply();
@@ -556,21 +633,29 @@
             }));
           }
         },
-        onLanguageReady: ({ code, cached: usedCache }) => {
+        onLanguageReady: ({ code, cached: usedCache, index }) => {
           ready.add(code);
           if (usedCache) {
             cached.add(code);
           }
           if (state.loadSequence === sequence) {
+            if (index) {
+              state.indexes = { ...state.indexes, [code]: index };
+              scheduleApply();
+            }
             setLocalizedStatus("loading", "pageLoadingCatalogs", {
               ready: ready.size,
               total: selected.length
             });
           }
         },
-        onLanguageError: ({ code, error }) => {
+        onLanguageError: ({ code, error, index }) => {
           ready.add(code);
           languageErrors.push(error);
+          if (state.loadSequence === sequence && index) {
+            state.indexes = { ...state.indexes, [code]: index };
+            scheduleApply();
+          }
         }
       });
 

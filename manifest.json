@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Netflix 浏览页字幕筛选助手",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "在 Netflix 各浏览页面按任意或同时满足的字幕语言条件自动筛选影片，并可在播放页导入本地字幕。",
   "minimum_chrome_version": "114",
   "permissions": [

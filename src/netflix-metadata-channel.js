@@ -296,11 +296,10 @@
     }
 
     activeEpoch += 1;
-    // The page bridge deliberately accepts only small, bounded requests. Keep
-    // every currently visible ID active so the larger inline bootstrap seed can
-    // still resolve it, while leaving IDs beyond the network batch unknown when
-    // no verified seed evidence exists.
-    pendingRequestIds = Array.from(activeIds).slice(0, identity.MAX_PAIRS);
+    // The bridge accepts the full bounded active set and returns evidence in
+    // small chunks. Sending every card prevents later homepage rows from being
+    // permanently starved behind the first 128 IDs.
+    pendingRequestIds = Array.from(activeIds);
     pendingRequestEpoch = activeEpoch;
     lastRequestedIds = new Set(activeIds);
     lastPostedEpoch = null;

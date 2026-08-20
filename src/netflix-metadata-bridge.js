@@ -14,6 +14,8 @@
   const MAX_CONCURRENT_RESPONSES = 2;
   const MAX_RESPONSES_PER_MINUTE = 30;
   const MAX_EVIDENCE_FACTS = 2_048;
+  const MAX_REQUEST_IDS = MAX_EVIDENCE_FACTS;
+  const MAX_TARGETED_FACTS = MAX_REQUEST_IDS * 3;
   const EVIDENCE_TTL_MS = 10 * 60 * 1000;
   const MAX_INLINE_SCAN_BYTES = 2 * 1024 * 1024;
   const RESPONSE_READ_TIMEOUT_MS = 8_000;
@@ -43,23 +45,44 @@
 
   function publish(analysis, { epoch = lastExternalEpoch } = {}) {
     if (!validEpoch(epoch)) {
-      return;
+      return { pairs: [], ambiguousIds: [] };
     }
-    try {
-      globalThis.postMessage({
-        source: MESSAGE_SOURCE,
-        type: "NCH_VIDEO_ID_MAP",
-        version: 1,
-        epoch,
-        ack: true,
-        pairs: identity.normalizePairs(analysis?.pairs),
-        ambiguousIds: Array.from(analysis?.ambiguousIds || [])
-          .filter((id) => typeof id === "string" && identity.isValidId(id))
-          .slice(0, identity.MAX_PAIRS)
-      }, location.origin);
-    } catch (_error) {
-      // Page-owned messaging must never escape into Netflix's request callbacks.
+    const rawPairs = Array.isArray(analysis?.pairs) ? analysis.pairs : [];
+    const rawAmbiguousIds = Array.from(analysis?.ambiguousIds || [])
+      .filter((id) => typeof id === "string" && identity.isValidId(id));
+    const chunkCount = Math.max(
+      1,
+      Math.ceil(rawPairs.length / identity.MAX_PAIRS),
+      Math.ceil(rawAmbiguousIds.length / identity.MAX_PAIRS)
+    );
+    const publishedPairs = [];
+    const publishedAmbiguousIds = [];
+    for (let index = 0; index < chunkCount; index += 1) {
+      const pairs = identity.normalizePairs(rawPairs.slice(
+        index * identity.MAX_PAIRS,
+        (index + 1) * identity.MAX_PAIRS
+      ));
+      const ambiguousIds = rawAmbiguousIds.slice(
+        index * identity.MAX_PAIRS,
+        (index + 1) * identity.MAX_PAIRS
+      );
+      try {
+        globalThis.postMessage({
+          source: MESSAGE_SOURCE,
+          type: "NCH_VIDEO_ID_MAP",
+          version: 1,
+          epoch,
+          ack: true,
+          pairs,
+          ambiguousIds
+        }, location.origin);
+        publishedPairs.push(...pairs);
+        publishedAmbiguousIds.push(...ambiguousIds);
+      } catch (_error) {
+        // Page-owned messaging must never escape into Netflix's request callbacks.
+      }
     }
+    return { pairs: publishedPairs, ambiguousIds: publishedAmbiguousIds };
   }
 
   function publishAck(epoch) {
@@ -176,17 +199,17 @@
 
   function mergePayloadFacts(payload) {
     if (typeof identity.factsFromPayload !== "function") {
-      return false;
+      return { complete: false, changed: false };
     }
 
     let facts;
     try {
       facts = identity.factsFromPayload(payload, MAX_EVIDENCE_FACTS);
     } catch (_error) {
-      return false;
+      return { complete: false, changed: false };
     }
     if (!facts?.complete) {
-      return false;
+      return { complete: false, changed: false };
     }
 
     const seenAt = Date.now();
@@ -205,7 +228,7 @@
         changed = mergeEvidenceShowRef(fact[0], fact[1], seenAt) || changed;
       }
     }
-    return changed;
+    return { complete: true, changed };
   }
 
   function evidenceAnalysis(ids = lastExternalRequestIds) {
@@ -239,6 +262,90 @@
     return { pairs, ambiguousIds };
   }
 
+  function analysisFromFacts(facts, ids) {
+    const types = new Map();
+    const showRefs = new Map();
+    const ambiguous = new Set(
+      Array.from(facts?.ambiguousIds || [])
+        .filter((id) => typeof id === "string" && identity.isValidId(id))
+    );
+
+    for (const fact of Array.isArray(facts?.types) ? facts.types : []) {
+      if (!Array.isArray(fact) || fact.length !== 2) {
+        continue;
+      }
+      const [id, type] = fact;
+      if (
+        typeof id !== "string"
+        || !identity.isValidId(id)
+        || (type !== "movie" && type !== "show" && type !== "episode")
+      ) {
+        continue;
+      }
+      const existing = types.get(id);
+      if (existing && existing !== type) {
+        types.delete(id);
+        ambiguous.add(id);
+      } else if (!ambiguous.has(id)) {
+        types.set(id, type);
+      }
+    }
+    for (const fact of Array.isArray(facts?.showRefs) ? facts.showRefs : []) {
+      if (!Array.isArray(fact) || fact.length !== 2) {
+        continue;
+      }
+      const [episodeId, showId] = fact;
+      if (
+        typeof episodeId !== "string"
+        || typeof showId !== "string"
+        || !identity.isValidId(episodeId)
+        || !identity.isValidId(showId)
+      ) {
+        continue;
+      }
+      const existing = showRefs.get(episodeId);
+      if (existing && existing !== showId) {
+        showRefs.delete(episodeId);
+        ambiguous.add(episodeId);
+      } else if (!ambiguous.has(episodeId)) {
+        showRefs.set(episodeId, showId);
+      }
+    }
+    for (const [episodeId, showId] of Array.from(showRefs)) {
+      if (
+        ambiguous.has(episodeId)
+        || ambiguous.has(showId)
+        || (types.has(episodeId) && types.get(episodeId) !== "episode")
+      ) {
+        showRefs.delete(episodeId);
+        types.delete(episodeId);
+        ambiguous.add(episodeId);
+      }
+    }
+
+    const pairs = [];
+    const ambiguousIds = [];
+    for (const structuralId of ids || []) {
+      if (ambiguous.has(structuralId)) {
+        ambiguousIds.push(structuralId);
+        continue;
+      }
+      const type = types.get(structuralId);
+      if (type === "movie" || type === "show") {
+        pairs.push([structuralId, structuralId]);
+        continue;
+      }
+      if (type !== "episode") {
+        continue;
+      }
+      const showId = showRefs.get(structuralId);
+      if (showId && !ambiguous.has(showId) && types.get(showId) === "show") {
+        pairs.push([structuralId, showId]);
+      }
+    }
+    return { pairs, ambiguousIds };
+  }
+
   function clearSettledPending(analysis) {
     for (const [structuralId] of analysis.pairs) {
       pendingIds.delete(structuralId);
@@ -260,18 +367,17 @@
     if (!analysis.pairs.length && !analysis.ambiguousIds.length) {
       return;
     }
-    publish(analysis);
-    clearSettledPending(analysis);
+    clearSettledPending(publish(analysis));
   }
 
   function processObservedPayload(payload) {
-    let changed = false;
+    let result = { complete: false, changed: false };
     try {
-      changed = mergePayloadFacts(payload);
+      result = mergePayloadFacts(payload);
     } catch (_error) {
       // A page-owned object or getter must never affect Netflix execution.
     }
-    if (changed) {
+    if (result.changed) {
       publishEvidenceForActive();
     }
   }
@@ -681,27 +787,58 @@
     }
 
     scanInlineCachesOnce();
-    let usedFactParser = false;
+    publishEvidenceForActive();
+    if (!pendingIds.size) {
+      return;
+    }
+
+    let factsComplete = false;
+    const cache = globalThis.netflix?.falcorCache;
     if (typeof identity.factsFromPayload === "function") {
-      usedFactParser = true;
       try {
-        mergePayloadFacts(globalThis.netflix?.falcorCache);
+        const facts = identity.factsFromPayload(
+          cache,
+          MAX_TARGETED_FACTS,
+          pendingIds
+        );
+        factsComplete = facts?.complete === true;
+        if (factsComplete) {
+          const analysis = analysisFromFacts(facts, pendingIds);
+          if (analysis.pairs.length || analysis.ambiguousIds.length) {
+            clearSettledPending(publish(analysis));
+          }
+        }
       } catch (_error) {
         // Netflix owns this MAIN-world object. Access failures remain unknown.
       }
-      publishEvidenceForActive();
     }
 
-    if (!usedFactParser && typeof identity.analyzePayload === "function") {
-      let analysis = { pairs: [], ambiguousIds: [] };
-      try {
-        analysis = identity.analyzePayload(globalThis.netflix?.falcorCache, pendingIds);
-      } catch (_error) {
-        // Keep compatibility with a missing or temporarily inaccessible cache.
-      }
-      if (analysis.pairs.length || analysis.ambiguousIds.length) {
-        publish(analysis);
-        clearSettledPending(analysis);
+    if (!factsComplete && typeof identity.analyzePayload === "function") {
+      const snapshot = Array.from(pendingIds);
+      for (let offset = 0; offset < snapshot.length; offset += identity.MAX_PAIRS) {
+        const batchIds = new Set(snapshot.slice(offset, offset + identity.MAX_PAIRS));
+        let analysis = { pairs: [], ambiguousIds: [], complete: false };
+        try {
+          analysis = identity.analyzePayload(cache, batchIds);
+        } catch (_error) {
+          // Keep compatibility with a missing or temporarily inaccessible cache.
+        }
+        if (analysis?.complete === true) {
+          if (analysis.pairs.length || analysis.ambiguousIds.length) {
+            clearSettledPending(publish(analysis));
+          }
+        } else if (analysis?.pairs?.length) {
+          // analyzePayload removes every uncertain mapping before returning.
+          // Its remaining self-ID pairs are strict positive evidence even when
+          // a very large cache prevented it from proving absence elsewhere.
+          // Do not publish incomplete ambiguousIds: those IDs must remain
+          // pending so later network evidence can still resolve them.
+          const positiveEvidence = {
+            pairs: analysis.pairs,
+            ambiguousIds: []
+          };
+          clearSettledPending(publish(positiveEvidence));
+        }
       }
     }
 
@@ -735,7 +872,7 @@
       || event.data.version !== 1
       || !validEpoch(event.data.epoch)
       || !Array.isArray(event.data.ids)
-      || event.data.ids.length > identity.MAX_PAIRS
+      || event.data.ids.length > MAX_REQUEST_IDS
       || event.data.ids.some((id) => typeof id !== "string" || !identity.isValidId(id))
     ) {
       return;

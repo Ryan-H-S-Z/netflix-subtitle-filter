@@ -25,11 +25,102 @@ test("normalizes legacy group objects, duplicate languages, and empty groups", (
   });
 
   assert.deepEqual(result, {
-    version: 1,
+    version: 2,
     enabled: true,
     showBadges: false,
+    unsupportedMode: rules.UNSUPPORTED_MODE_HIDE,
     groups: [["zh-hant"], ["en"]]
   });
+});
+
+test("migrates legacy unsupported-card behavior to hide and accepts mark mode", () => {
+  const legacy = rules.normalizeFilter({
+    version: 1,
+    enabled: true,
+    groups: [["en"]]
+  });
+  const marked = rules.normalizeFilter({
+    ...legacy,
+    unsupportedMode: "mark"
+  });
+  const invalid = rules.normalizeFilter({
+    ...legacy,
+    unsupportedMode: "unexpected"
+  });
+
+  assert.equal(legacy.version, 2);
+  assert.equal(legacy.unsupportedMode, rules.UNSUPPORTED_MODE_HIDE);
+  assert.equal(marked.unsupportedMode, rules.UNSUPPORTED_MODE_MARK);
+  assert.equal(invalid.unsupportedMode, rules.UNSUPPORTED_MODE_HIDE);
+});
+
+test("resolves unsupported cards to either hide or a red-mark policy", () => {
+  const hidden = rules.resolveCardDisplay(rules.NO_MATCH, {
+    unsupportedMode: rules.UNSUPPORTED_MODE_HIDE,
+    showBadges: true
+  });
+  const markedWithoutLanguageBadges = rules.resolveCardDisplay(rules.NO_MATCH, {
+    unsupportedMode: rules.UNSUPPORTED_MODE_MARK,
+    showBadges: false
+  });
+  const markedWithLanguageBadges = rules.resolveCardDisplay(rules.NO_MATCH, {
+    unsupportedMode: rules.UNSUPPORTED_MODE_MARK,
+    showBadges: true
+  });
+
+  assert.deepEqual(hidden, {
+    hidden: true,
+    markUnsupported: false,
+    showLanguageBadge: false
+  });
+  assert.deepEqual(markedWithoutLanguageBadges, {
+    hidden: false,
+    markUnsupported: true,
+    showLanguageBadge: false
+  });
+  assert.deepEqual(markedWithLanguageBadges, markedWithoutLanguageBadges);
+});
+
+test("unknown cards fail open and display policies do not retain the prior mode", () => {
+  const marked = rules.resolveCardDisplay(rules.NO_MATCH, {
+    unsupportedMode: rules.UNSUPPORTED_MODE_MARK,
+    showBadges: false
+  });
+  const hidden = rules.resolveCardDisplay(rules.NO_MATCH, {
+    unsupportedMode: rules.UNSUPPORTED_MODE_HIDE,
+    showBadges: false
+  });
+  const unknown = rules.resolveCardDisplay(rules.UNKNOWN, {
+    unsupportedMode: rules.UNSUPPORTED_MODE_MARK,
+    showBadges: false
+  });
+
+  assert.equal(marked.markUnsupported, true);
+  assert.deepEqual(hidden, {
+    hidden: true,
+    markUnsupported: false,
+    showLanguageBadge: false
+  });
+  assert.deepEqual(unknown, {
+    hidden: false,
+    markUnsupported: false,
+    showLanguageBadge: false
+  });
+});
+
+test("matching and partially known cards honor the language-badge toggle", () => {
+  for (const resultState of [rules.MATCH, rules.UNKNOWN]) {
+    assert.deepEqual(rules.resolveCardDisplay(resultState, { showBadges: true }), {
+      hidden: false,
+      markUnsupported: false,
+      showLanguageBadge: true
+    });
+    assert.deepEqual(rules.resolveCardDisplay(resultState, { showBadges: false }), {
+      hidden: false,
+      markUnsupported: false,
+      showLanguageBadge: false
+    });
+  }
 });
 
 test("uses OR inside a condition group", () => {
@@ -70,6 +161,20 @@ test("fails open when a catalog is incomplete", () => {
   });
 
   assert.equal(result.state, rules.UNKNOWN);
+});
+
+test("retains confirmed languages when another required group is unknown", () => {
+  const filter = {
+    enabled: true,
+    groups: [["zh-hans"], ["en"]]
+  };
+  const result = rules.evaluateTitle("100", filter, {
+    "zh-hans": index(["100"], true),
+    en: index([], false)
+  });
+
+  assert.equal(result.state, rules.UNKNOWN);
+  assert.deepEqual(result.matchedLanguages, ["zh-hans"]);
 });
 
 test("a known false AND group rejects even when another group is unknown", () => {

@@ -1,6 +1,6 @@
 {
   "name": "netflix-home-subtitle-filter",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "A local Manifest V3 extension for automatically filtering Netflix browsing-page cards by subtitle-language rules and loading local subtitles.",
   "scripts": {

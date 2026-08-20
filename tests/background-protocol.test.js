@@ -246,7 +246,7 @@ function leaseMessage(type) {
 function validCacheRecord(overrides = {}) {
   const request = leaseMessage("NCH_ACQUIRE_CATALOG_FETCH_LEASE");
   return {
-    version: 4,
+    version: 5,
     generation: request.generation,
     code: request.code,
     scope: request.scope,

@@ -46,6 +46,10 @@
       addGroup: "＋ 增加一个“还必须包含”的条件",
       showBadges: "在影片卡片显示匹配语言",
       showBadgesHint: "仅显示您条件中已确认支持的语言",
+      unsupportedModeLabel: "已确认不符合条件的影片",
+      unsupportedModeHint: "资料未知的影片始终保持显示，避免误判",
+      unsupportedModeHide: "隐藏卡片",
+      unsupportedModeMark: "显示并标红",
       saveApply: "保存并立即筛选",
       saving: "正在保存并读取…",
       manualRefresh: "结果不对？清除全部缓存并重新读取",
@@ -114,13 +118,17 @@
       scheduleResetFailed: "字幕资料已更新，但无法重置下次每周检查时间；请关闭再重新开启每周更新。",
       filterStatusLoading: "正在读取 Netflix 字幕资料…",
       filterStatusReady: "字幕筛选：显示 {matched} / {total} 部影片",
+      filterStatusReadyMarked: "字幕筛选：匹配 {matched} · 标红 {marked} 部不符合影片",
       filterStatusPartial: "字幕筛选：匹配 {matched} · 暂时保留 {unknown} 部未知影片",
+      filterStatusPartialMarked: "字幕筛选：匹配 {matched} · 标红 {marked} · 暂时保留 {unknown} 部未知影片",
       filterStatusError: "暂时无法读取 Netflix 字幕资料，未知影片保持显示；切换页面或手动更新可重试",
       filterStatusRetrying: "字幕资料暂时不完整，未知影片保持显示；{seconds} 秒后重试（{attempt}/{max}）",
       pageNoIdentity: "字幕筛选：无法安全确认此页影片编号，已保留全部影片",
       pageLoadingCatalogs: "正在读取字幕目录 {ready} / {total}",
       pageLoadingLanguage: "正在读取{language}字幕目录 · {count} 部",
       pageConfirmedSubtitles: "已确认字幕：{languages}",
+      pageUnsupportedBadge: "不符合条件",
+      pageUnsupportedBadgeTitle: "已确认不符合所选字幕条件",
       pageCachedSuffix: " · 已使用缓存"
     }),
     "zh-hant": Object.freeze({
@@ -152,6 +160,10 @@
       addGroup: "＋ 增加一個「還必須包含」的條件",
       showBadges: "在影片卡片顯示符合語言",
       showBadgesHint: "只顯示條件中已確認支援的語言",
+      unsupportedModeLabel: "已確認不符合條件的影片",
+      unsupportedModeHint: "資料未知的影片一律保持顯示，避免誤判",
+      unsupportedModeHide: "隱藏卡片",
+      unsupportedModeMark: "顯示並標紅",
       saveApply: "儲存並立即篩選",
       saving: "正在儲存並讀取…",
       manualRefresh: "結果不對？清除全部快取並重新讀取",
@@ -220,13 +232,17 @@
       scheduleResetFailed: "字幕資料已更新，但無法重設下次每週檢查時間；請關閉再重新開啟每週更新。",
       filterStatusLoading: "正在讀取 Netflix 字幕資料…",
       filterStatusReady: "字幕篩選：顯示 {matched} / {total} 部影片",
+      filterStatusReadyMarked: "字幕篩選：符合 {matched} · 標紅 {marked} 部不符合影片",
       filterStatusPartial: "字幕篩選：符合 {matched} · 暫時保留 {unknown} 部未知影片",
+      filterStatusPartialMarked: "字幕篩選：符合 {matched} · 標紅 {marked} · 暫時保留 {unknown} 部未知影片",
       filterStatusError: "暫時無法讀取 Netflix 字幕資料，未知影片會保持顯示；切換頁面或手動更新可重試",
       filterStatusRetrying: "字幕資料暫時不完整，未知影片會保持顯示；{seconds} 秒後重試（{attempt}/{max}）",
       pageNoIdentity: "字幕篩選：無法安全確認此頁影片編號，已保留全部影片",
       pageLoadingCatalogs: "正在讀取字幕目錄 {ready} / {total}",
       pageLoadingLanguage: "正在讀取{language}字幕目錄 · {count} 部",
       pageConfirmedSubtitles: "已確認字幕：{languages}",
+      pageUnsupportedBadge: "不符合條件",
+      pageUnsupportedBadgeTitle: "已確認不符合所選字幕條件",
       pageCachedSuffix: " · 已使用快取"
     }),
     en: Object.freeze({
@@ -258,6 +274,10 @@
       addGroup: "+ Add another required group",
       showBadges: "Show matching languages on cards",
       showBadgesHint: "Only shows selected languages confirmed for that title",
+      unsupportedModeLabel: "Titles confirmed not to match",
+      unsupportedModeHint: "Titles with unknown data always remain visible to avoid false results",
+      unsupportedModeHide: "Hide cards",
+      unsupportedModeMark: "Show with red tag",
       saveApply: "Save and filter now",
       saving: "Saving and loading…",
       manualRefresh: "Wrong results? Clear all cache and reload",
@@ -326,13 +346,17 @@
       scheduleResetFailed: "Subtitle data was updated, but the next weekly check could not be reset. Turn weekly updates off and on again.",
       filterStatusLoading: "Loading Netflix subtitle data…",
       filterStatusReady: "Subtitle filter: showing {matched} of {total} titles",
+      filterStatusReadyMarked: "Subtitle filter: {matched} matches · {marked} non-matches marked",
       filterStatusPartial: "Subtitle filter: {matched} matches · keeping {unknown} unknown titles",
+      filterStatusPartialMarked: "Subtitle filter: {matched} matches · {marked} marked · keeping {unknown} unknown titles",
       filterStatusError: "Subtitle data is temporarily unavailable; unknown titles remain visible. Navigate or update manually to retry",
       filterStatusRetrying: "Subtitle data is incomplete; unknown titles remain visible. Retrying in {seconds}s ({attempt}/{max})",
       pageNoIdentity: "Subtitle filter: title IDs could not be verified safely; all titles remain visible",
       pageLoadingCatalogs: "Loading subtitle catalogs {ready} / {total}",
       pageLoadingLanguage: "Loading {language} subtitles · {count} titles",
       pageConfirmedSubtitles: "Confirmed subtitles: {languages}",
+      pageUnsupportedBadge: "Doesn't match",
+      pageUnsupportedBadgeTitle: "Confirmed not to match the selected subtitle rule",
       pageCachedSuffix: " · cached"
     })
   });
@@ -407,6 +431,15 @@
     };
   }
 
+  function unsupportedBadgePresentation(locale) {
+    const normalizedLocale = normalizeUiLanguage(locale);
+    return {
+      lang: UI_LANGUAGE_TAGS[normalizedLocale],
+      text: t(normalizedLocale, "pageUnsupportedBadge"),
+      title: t(normalizedLocale, "pageUnsupportedBadgeTitle")
+    };
+  }
+
   function createUiLanguageController(initialValue = DEFAULT_UI_LANGUAGE, onChange = () => {}) {
     let value = normalizeUiLanguage(initialValue);
     let revision = 0;
@@ -451,6 +484,7 @@
     t,
     languageName,
     languageBadgePresentation,
+    unsupportedBadgePresentation,
     createUiLanguageController,
     messageKeys
   });

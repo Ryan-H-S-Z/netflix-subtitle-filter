@@ -74,6 +74,17 @@
         <div class="groups" id="filter-groups"></div>
         <button class="add-group" id="add-group" type="button" disabled data-i18n="addGroup">＋ 增加一个“还必须包含”的条件</button>
 
+        <label class="setting-select-row unsupported-mode-row" for="unsupported-mode">
+          <span>
+            <strong data-i18n="unsupportedModeLabel">不符合字幕条件的影片</strong>
+            <small data-i18n="unsupportedModeHint">只影响已确认不符合的影片；资料未知时仍保持显示</small>
+          </span>
+          <select id="unsupported-mode" disabled>
+            <option value="hide" data-i18n="unsupportedModeHide">隐藏</option>
+            <option value="mark" data-i18n="unsupportedModeMark">显示并标红</option>
+          </select>
+        </label>
+
         <label class="toggle-row badge-toggle">
           <span>
             <strong data-i18n="showBadges">在影片卡片显示匹配语言</strong>

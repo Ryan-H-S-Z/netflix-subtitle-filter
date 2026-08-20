@@ -15,14 +15,17 @@
   const MATCH = "match";
   const NO_MATCH = "no-match";
   const UNKNOWN = "unknown";
+  const UNSUPPORTED_MODE_HIDE = "hide";
+  const UNSUPPORTED_MODE_MARK = "mark";
   const MAX_GROUPS = 6;
   const MAX_LANGUAGES_PER_GROUP = 8;
   const MAX_UNIQUE_LANGUAGES = 8;
 
   const DEFAULT_CARD_FILTER = Object.freeze({
-    version: 1,
+    version: 2,
     enabled: false,
     showBadges: true,
+    unsupportedMode: UNSUPPORTED_MODE_HIDE,
     groups: Object.freeze([
       Object.freeze(["zh-hant", "zh-hans"])
     ])
@@ -81,9 +84,12 @@
     }
 
     return {
-      version: 1,
+      version: 2,
       enabled: Boolean(value?.enabled) && (!hasExplicitGroups || hasValidGroups),
       showBadges: value?.showBadges !== false,
+      unsupportedMode: value?.unsupportedMode === UNSUPPORTED_MODE_MARK
+        ? UNSUPPORTED_MODE_MARK
+        : UNSUPPORTED_MODE_HIDE,
       groups
     };
   }
@@ -183,10 +189,24 @@
     };
   }
 
+  function resolveCardDisplay(resultState, filter = DEFAULT_CARD_FILTER) {
+    const isUnsupported = resultState === NO_MATCH;
+    const markUnsupported = isUnsupported
+      && filter?.unsupportedMode === UNSUPPORTED_MODE_MARK;
+
+    return {
+      hidden: isUnsupported && !markUnsupported,
+      markUnsupported,
+      showLanguageBadge: !isUnsupported && filter?.showBadges !== false
+    };
+  }
+
   return Object.freeze({
     MATCH,
     NO_MATCH,
     UNKNOWN,
+    UNSUPPORTED_MODE_HIDE,
+    UNSUPPORTED_MODE_MARK,
     MAX_GROUPS,
     MAX_LANGUAGES_PER_GROUP,
     MAX_UNIQUE_LANGUAGES,
@@ -197,6 +217,7 @@
     evaluateLanguageIdentity,
     combineOr,
     combineAnd,
-    evaluateTitle
+    evaluateTitle,
+    resolveCardDisplay
   });
 });

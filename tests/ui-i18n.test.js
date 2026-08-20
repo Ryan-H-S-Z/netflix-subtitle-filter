@@ -62,6 +62,24 @@ test("builds card badge text and title in the selected interface language", () =
   );
 });
 
+test("builds localized red badges for titles confirmed not to match", () => {
+  assert.deepEqual(i18n.unsupportedBadgePresentation("zh-hans"), {
+    lang: "zh-CN",
+    text: "不符合条件",
+    title: "已确认不符合所选字幕条件"
+  });
+  assert.deepEqual(i18n.unsupportedBadgePresentation("zh-hant"), {
+    lang: "zh-TW",
+    text: "不符合條件",
+    title: "已確認不符合所選字幕條件"
+  });
+  assert.deepEqual(i18n.unsupportedBadgePresentation("en"), {
+    lang: "en",
+    text: "Doesn't match",
+    title: "Confirmed not to match the selected subtitle rule"
+  });
+});
+
 test("keeps a newer language change when an older initial read finishes later", () => {
   const changes = [];
   const controller = i18n.createUiLanguageController("zh-hans", (next) => changes.push(next));

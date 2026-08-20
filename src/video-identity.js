@@ -58,7 +58,10 @@
   }
 
   function resolveStructuralIds(explicitIds, watchIds, videoIdMap) {
-    const resolved = new Set(explicitIds || []);
+    const resolved = new Set();
+    for (const explicitId of explicitIds || []) {
+      resolved.add(videoIdMap?.get(explicitId) || explicitId);
+    }
     for (const watchId of watchIds || []) {
       resolved.add(videoIdMap?.get(watchId) || watchId);
     }
@@ -676,13 +679,18 @@
     return caches;
   }
 
-  function factsFromPayload(payload, factLimit = MAX_EVIDENCE_FACTS) {
+  function factsFromPayload(payload, factLimit = MAX_EVIDENCE_FACTS, requestedIds = null) {
     const limit = Number.isSafeInteger(factLimit) && factLimit > 0
       ? Math.min(factLimit, MAX_VIDEO_NODES)
       : MAX_EVIDENCE_FACTS;
     const types = new Map();
     const showRefs = new Map();
     const ambiguous = new Set();
+    const requested = requestedIds == null
+      ? null
+      : new Set(Array.from(requestedIds)
+        .filter((id) => typeof id === "string" && isValidId(id))
+        .slice(0, MAX_EVIDENCE_FACTS));
     const queue = [{ value: payload, depth: 0 }];
     const seen = new WeakSet();
     let visited = 0;
@@ -763,7 +771,9 @@
           ) {
             continue;
           }
-          addType(id, type);
+          if (!requested || requested.has(id)) {
+            addType(id, type);
+          }
           if (type === "show") {
             const reference = node.current?.$type === "ref" && Array.isArray(node.current.value)
               ? node.current.value
@@ -773,7 +783,12 @@
               reference?.length === 2
               && reference[0] === "videos"
               && isValidId(episodeId)
+              && (!requested || requested.has(episodeId))
             ) {
+              // Resolving a requested episode also requires proof that its
+              // canonical target is a show, even when that show was not itself
+              // part of the request.
+              addType(id, type);
               addShowRef(episodeId, id);
             }
           }
@@ -839,7 +854,12 @@
         explicitIds.push(title);
       }
 
-      watchId = url.pathname.match(/^\/watch\/(\d{4,20})\/?$/)?.[1] || null;
+      // Homepage play links may be /watch/episode?jbv=canonical-title. In that
+      // shape jbv is the stable card identity and the watch ID is only an
+      // action target, not a second title contained by the card.
+      if (!explicitIds.length) {
+        watchId = url.pathname.match(/^\/watch\/(\d{4,20})\/?$/)?.[1] || null;
+      }
     } catch (_error) {
       // Invalid and cross-origin links deliberately remain unresolved.
     }

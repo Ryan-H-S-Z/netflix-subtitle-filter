@@ -80,6 +80,10 @@ test("extracts only same-origin explicit and watch IDs from strict Netflix links
     explicitIds: [],
     watchId: "80000003"
   });
+  assert.deepEqual(identity.idsFromHref("/watch/80000003?jbv=80000001", base), {
+    explicitIds: ["80000001"],
+    watchId: null
+  });
   assert.deepEqual(identity.idsFromHref("https://example.com/watch/80000003", base), {
     explicitIds: [],
     watchId: null
@@ -103,6 +107,17 @@ test("keeps mixed card identities ambiguous until every watch ID maps to one tit
       ["80000002", "80000001"],
       ["80000003", "80000001"]
     ]))],
+    ["80000001"]
+  );
+});
+
+test("canonicalizes an explicit homepage ID when verified metadata maps it to a show", () => {
+  assert.deepEqual(
+    [...identity.resolveStructuralIds(
+      new Set(["80000003"]),
+      new Set(),
+      new Map([["80000003", "80000001"]])
+    )],
     ["80000001"]
   );
 });
@@ -332,4 +347,27 @@ test("rejects incomplete or error-bearing evidence payloads", () => {
     ambiguousIds: [],
     complete: false
   });
+});
+
+test("extracts requested homepage facts without spending the fact budget on unrelated cache nodes", () => {
+  const videos = {};
+  for (let index = 0; index < 3_000; index += 1) {
+    const id = String(100_000 + index);
+    videos[id] = { summary: atom({ type: "movie", id: Number(id) }) };
+  }
+  videos["9000"] = {
+    summary: atom({ type: "show", id: 9000 }),
+    current: { $type: "ref", value: ["videos", "9001"] }
+  };
+  videos["9001"] = { summary: atom({ type: "episode", id: 9001 }) };
+
+  assert.deepEqual(
+    identity.factsFromPayload({ videos }, 6, new Set(["9001"])),
+    {
+      types: [["9000", "show"], ["9001", "episode"]],
+      showRefs: [["9001", "9000"]],
+      ambiguousIds: [],
+      complete: true
+    }
+  );
 });

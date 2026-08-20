@@ -319,3 +319,167 @@ test("passive XHR observation preserves open/send results and publishes the acti
   assert.equal(mappingMessage.epoch, 9);
   assert.deepEqual(Array.from(mappingMessage.pairs, (pair) => Array.from(pair)), [["2000", "1000"]]);
 });
+
+function createScanHarness(identity, falcorCache = {}) {
+  const listeners = new Map();
+  const messages = [];
+  const timers = makeTimerQueue();
+  const context = vm.createContext({
+    NetflixSubtitleVideoIdentity: identity,
+    netflix: { falcorCache },
+    location: {
+      origin: "https://www.netflix.com",
+      href: "https://www.netflix.com/browse"
+    },
+    document: { scripts: [] },
+    URL,
+    postMessage(message) {
+      messages.push(message);
+    },
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+    setTimeout: timers.setTimeout,
+    clearTimeout: timers.clearTimeout
+  });
+  vm.runInContext(bridgeSource, context);
+  const contextGlobal = vm.runInContext("globalThis", context);
+
+  return {
+    messages,
+    timers,
+    dispatch(ids, epoch = 1) {
+      listeners.get("message")({
+        source: contextGlobal,
+        origin: context.location.origin,
+        data: {
+          source: "nch-netflix-card-filter",
+          type: "NCH_REQUEST_VIDEO_ID_MAP",
+          version: 1,
+          epoch,
+          ids
+        }
+      });
+    },
+    drain(limit = 100) {
+      let count = 0;
+      while (timers.tasks.length) {
+        const task = timers.tasks.shift();
+        if (!task.cancelled) {
+          task.callback();
+          count += 1;
+        }
+        assert.ok(count <= limit, "bounded bridge timers should settle");
+      }
+    }
+  };
+}
+
+test("accepts 2048 active IDs while chunking a 300-pair response", () => {
+  const ids = Array.from({ length: 300 }, (_, index) => String(40_000 + index));
+  const identity = {
+    ...identityModule,
+    factsFromPayload() {
+      return {
+        types: ids.map((id) => [id, "movie"]),
+        showRefs: [],
+        ambiguousIds: [],
+        complete: true
+      };
+    }
+  };
+  const harness = createScanHarness(identity);
+
+  harness.dispatch(ids, 12);
+  harness.drain();
+
+  const mappingMessages = harness.messages.filter((message) => message.pairs.length);
+  assert.deepEqual(mappingMessages.map((message) => message.pairs.length), [128, 128, 44]);
+  assert.ok(mappingMessages.every((message) => message.epoch === 12));
+  assert.ok(mappingMessages.every((message) => message.pairs.length <= identity.MAX_PAIRS));
+  assert.equal(mappingMessages.flatMap((message) => message.pairs).length, ids.length);
+
+  const beforeOversized = harness.messages.length;
+  harness.dispatch(Array.from({ length: 2_049 }, (_, index) => String(50_000 + index)), 13);
+  harness.drain();
+  assert.equal(harness.messages.length, beforeOversized, "2049 IDs must be rejected");
+});
+
+test("falls back in 128-ID batches when the strict fact scan is incomplete", () => {
+  const ids = Array.from({ length: 300 }, (_, index) => String(60_000 + index));
+  const scans = [];
+  const identity = {
+    ...identityModule,
+    factsFromPayload() {
+      return { types: [], showRefs: [], ambiguousIds: [], complete: false };
+    },
+    analyzePayload(_payload, requestedIds) {
+      const batch = [...requestedIds];
+      scans.push(batch);
+      return {
+        pairs: batch.map((id) => [id, id]),
+        ambiguousIds: [],
+        complete: true
+      };
+    }
+  };
+  const harness = createScanHarness(identity);
+
+  harness.dispatch(ids, 21);
+  harness.drain();
+
+  assert.deepEqual(scans.map((batch) => batch.length), [128, 128, 44]);
+  assert.ok(scans.flat().every((id, index) => id === ids[index]));
+  assert.equal(
+    harness.messages.flatMap((message) => message.pairs).length,
+    ids.length
+  );
+});
+
+test("keeps safe self-pairs but not ambiguous evidence from an incomplete fallback traversal", () => {
+  const identity = {
+    ...identityModule,
+    factsFromPayload() {
+      return { types: [], showRefs: [], ambiguousIds: [], complete: false };
+    },
+    analyzePayload(_payload, requestedIds) {
+      const ids = [...requestedIds];
+      return {
+        pairs: ids.includes("70000") ? [["70000", "70000"]] : [],
+        ambiguousIds: ids.includes("70001") ? ["70001"] : [],
+        complete: false
+      };
+    }
+  };
+  const harness = createScanHarness(identity);
+
+  harness.dispatch(["70000", "70001"], 22);
+  harness.drain();
+
+  assert.ok(harness.messages.length >= 1, "the empty ACK should still be sent");
+  assert.ok(harness.messages.some((message) => (
+    message.pairs.some((pair) => pair[0] === "70000" && pair[1] === "70000")
+  )));
+  assert.ok(harness.messages.every((message) => message.ambiguousIds.length === 0));
+});
+
+test("targeted facts quarantine an ID that conflicts between a self type and a show reference", () => {
+  const identity = {
+    ...identityModule,
+    factsFromPayload() {
+      return {
+        types: [["80000", "movie"], ["80001", "show"]],
+        showRefs: [["80000", "80001"]],
+        ambiguousIds: [],
+        complete: true
+      };
+    }
+  };
+  const harness = createScanHarness(identity);
+
+  harness.dispatch(["80000"], 23);
+  harness.drain();
+
+  assert.ok(harness.messages.every((message) => message.pairs.length === 0));
+  assert.ok(harness.messages.some((message) => message.ambiguousIds.includes("80000")));
+});

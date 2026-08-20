@@ -41,6 +41,15 @@ test("parses a complete localized title batch and rejects partial data", () => {
     () => catalog.parseTitleBatch(payload, ["1000", "3000"]),
     /不完整/
   );
+  assert.deepEqual(
+    catalog.parseTitleBatchEvidence(payload, ["1000", "3000"]),
+    {
+      titles: ["整部电视剧"],
+      resolvedIds: ["1000"],
+      missingIds: ["3000"],
+      complete: false
+    }
+  );
 });
 
 test("extracts only validated video references from a catalog response", () => {
@@ -274,10 +283,41 @@ test("distinguishes an internal catalog timeout from a user-initiated abort", ()
   assert.match(timeoutError.message, /超时/);
 });
 
+test("allows larger subtitle catalogs and never treats a truncated index as ready", () => {
+  assert.equal(catalog.MAX_CATALOG_ITEMS, 50_000);
+
+  const incomplete = {
+    ids: new Set(["1000"]),
+    complete: false,
+    error: "catalog truncated"
+  };
+  const error = catalog.languageIndexError(incomplete);
+  assert.equal(error.name, "IncompleteCatalogError");
+  assert.equal(error.message, "catalog truncated");
+  assert.equal(catalog.languageIndexError({ complete: true }), null);
+});
+
+test("keeps a freshly fetched complete index authoritative when only caching fails", () => {
+  const fetched = {
+    ids: new Set(["1000", "2000"]),
+    titles: new Set(["one", "two"]),
+    complete: true,
+    titlesComplete: true
+  };
+  const index = catalog.uncachedFetchedIndex(fetched, "storage full");
+
+  assert.equal(index.complete, true);
+  assert.equal(index.titlesComplete, true);
+  assert.equal(index.cached, false);
+  assert.equal(index.uncached, true);
+  assert.equal(index.cacheError, "storage full");
+  assert.equal(catalog.languageIndexError(index), null);
+});
+
 test("keeps complete cache records until manual refresh for the same profile scope", () => {
   const now = Date.now();
   const record = {
-    version: 4,
+    version: 5,
     generation: 4,
     code: "en",
     scope: "TH-test",
@@ -293,6 +333,13 @@ test("keeps complete cache records until manual refresh for the same profile sco
   assert.equal(catalog.validCacheRecord(record, "en", "TH-test", now, 4), true);
   assert.equal(catalog.validCacheRecord(record, "en", "TH-test", now, 5), false);
   assert.equal(catalog.validCacheRecord({ ...record, complete: false }, "en", "TH-test", now), false);
+  assert.equal(catalog.validCacheRecord({
+    ...record,
+    ids: [],
+    titles: [],
+    titlesComplete: false,
+    titleSourceCount: 0
+  }, "en", "TH-test", now), false);
   assert.equal(catalog.validCacheRecord(record, "en", "TH-other", now), false);
   assert.equal(catalog.validCacheRecord({ ...record, ids: ["bad"] }, "en", "TH-test", now), false);
   assert.equal(catalog.validCacheRecord({ ...record, ids: [1000] }, "en", "TH-test", now), false);
@@ -300,8 +347,14 @@ test("keeps complete cache records until manual refresh for the same profile sco
   assert.equal(catalog.validCacheRecord({ ...record, titles: [""] }, "en", "TH-test", now), false);
   assert.equal(catalog.validCacheRecord({ ...record, titles: [], titlesComplete: true }, "en", "TH-test", now), false);
   assert.equal(catalog.validCacheRecord({ ...record, titleSourceCount: 0 }, "en", "TH-test", now), false);
+  assert.equal(catalog.validCacheRecord({ ...record, titleSourceCount: 2 }, "en", "TH-test", now), false);
+  assert.equal(catalog.validCacheRecord({
+    ...record,
+    titlesComplete: false,
+    titleSourceCount: 0
+  }, "en", "TH-test", now), true);
   assert.equal(catalog.validCacheRecord({ ...record, genreId: "old" }, "en", "TH-test", now), false);
-  assert.equal(catalog.validCacheRecord({ ...record, version: 3 }, "en", "TH-test", now), false);
+  assert.equal(catalog.validCacheRecord({ ...record, version: 4 }, "en", "TH-test", now), false);
 });
 
 test("uses generation-specific per-language storage keys", () => {
@@ -328,6 +381,7 @@ test("keeps stale complete names only as positive evidence when name refresh fai
     titleSourceCount: 0
   };
   const staleRecord = {
+    ids: ["1000", "2000"],
     titles: ["old localized show"],
     titlesComplete: true,
     titleSourceCount: 1
@@ -338,6 +392,22 @@ test("keeps stale complete names only as positive evidence when name refresh fai
   assert.deepEqual(Array.from(merged.titles), ["old localized show"]);
   assert.equal(merged.titlesComplete, false);
   assert.equal(merged.staleTitles, true);
+
+  const partialUnion = catalog.preserveStalePositiveTitles({
+    ...refreshed,
+    titles: new Set(["new partial show"]),
+    titleSourceCount: 2
+  }, {
+    ids: ["1000", "2000"],
+    titles: ["old partial show"],
+    titlesComplete: false,
+    titleSourceCount: 2
+  });
+  assert.deepEqual(
+    Array.from(partialUnion.titles),
+    ["new partial show", "old partial show"]
+  );
+  assert.equal(partialUnion.titleSourceCount, 2);
 
   const completeRefresh = {
     ...refreshed,

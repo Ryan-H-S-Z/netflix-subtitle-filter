@@ -8,6 +8,7 @@
   const catalog = globalThis.NetflixSubtitleCatalog;
   const filterEnabledInput = document.getElementById("filter-enabled");
   const showBadgesInput = document.getElementById("show-badges");
+  const unsupportedModeInput = document.getElementById("unsupported-mode");
   const groupsContainer = document.getElementById("filter-groups");
   const addGroupButton = document.getElementById("add-group");
   const applyFilterButton = document.getElementById("apply-filter");
@@ -68,12 +69,25 @@
       return t("filterStatusLoading");
     }
     if (filterStatus.phase === "partial") {
+      if (Number(filterStatus.marked || 0) > 0) {
+        return t("filterStatusPartialMarked", {
+          matched: Number(filterStatus.matched || 0),
+          marked: Number(filterStatus.marked || 0),
+          unknown: Number(filterStatus.unknown || 0)
+        });
+      }
       return t("filterStatusPartial", {
         matched: Number(filterStatus.matched || 0),
         unknown: Number(filterStatus.unknown || 0)
       });
     }
     if (filterStatus.phase === "ready") {
+      if (Number(filterStatus.marked || 0) > 0) {
+        return t("filterStatusReadyMarked", {
+          matched: Number(filterStatus.matched || 0),
+          marked: Number(filterStatus.marked || 0)
+        });
+      }
       return t("filterStatusReady", {
         matched: Number(filterStatus.matched || 0),
         total: Number(filterStatus.total || 0)
@@ -144,6 +158,7 @@
     weeklyCacheRefreshInput.disabled = locked;
     filterEnabledInput.disabled = locked;
     showBadgesInput.disabled = locked;
+    unsupportedModeInput.disabled = locked;
     presetButtons.forEach((button) => {
       button.disabled = locked;
     });
@@ -387,7 +402,8 @@
       const filterToSave = rules.normalizeFilter({
         ...filterDraft,
         enabled: filterEnabledInput.checked,
-        showBadges: showBadgesInput.checked
+        showBadges: showBadgesInput.checked,
+        unsupportedMode: unsupportedModeInput.value
       });
       filterDraft = filterToSave;
       await chrome.storage.sync.set({ cardFilter: filterToSave });
@@ -459,6 +475,12 @@
   });
 
   showBadgesInput.addEventListener("change", () => {
+    if (initialized) {
+      markFilterDraftChanged();
+    }
+  });
+
+  unsupportedModeInput.addEventListener("change", () => {
     if (initialized) {
       markFilterDraftChanged();
     }
@@ -663,6 +685,7 @@
     filterDraftDirty = false;
     updateFilterStateLabel();
     showBadgesInput.checked = filterDraft.showBadges;
+    unsupportedModeInput.value = filterDraft.unsupportedMode;
     showFloatingInput.checked = Boolean(settings.showFloatingButton);
 
     const preferredInput = preferredLanguageInputs.find((input) => input.value === preferredLanguage);

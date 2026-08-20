@@ -15,7 +15,7 @@
   const ENDPOINT_PATH = "/nq/website/memberapi/release/pathEvaluator";
   const CHUNK_SIZE = 200;
   const TITLE_BATCH_SIZE = 200;
-  const MAX_CATALOG_ITEMS = 20_000;
+  const MAX_CATALOG_ITEMS = 50_000;
   const MAX_CACHE_RECORDS = 8;
   const MAX_CACHE_BYTES = 8 * 1024 * 1024;
   const LANGUAGE_LOAD_TIMEOUT_MS = 12 * 60 * 1000;
@@ -201,7 +201,7 @@
     return result;
   }
 
-  function parseTitleBatch(payload, requestedIds) {
+  function parseTitleBatchEvidence(payload, requestedIds) {
     const responseErrors = payload?.errors;
     const hasResponseErrors = responseErrors != null
       && (!Array.isArray(responseErrors) || responseErrors.length > 0);
@@ -217,6 +217,8 @@
     }
 
     const titles = [];
+    const resolvedIds = [];
+    const missingIds = [];
     for (const rawId of requestedIds) {
       const id = String(rawId || "");
       const titleNode = videoNodes[id]?.title;
@@ -224,12 +226,27 @@
         ? config.normalizeTitle(titleNode.value)
         : "";
       if (!title) {
-        throw new Error("Netflix 影片名称目录数据不完整");
+        missingIds.push(id);
+        continue;
       }
       titles.push(title);
+      resolvedIds.push(id);
     }
 
-    return titles;
+    return {
+      titles,
+      resolvedIds,
+      missingIds,
+      complete: missingIds.length === 0
+    };
+  }
+
+  function parseTitleBatch(payload, requestedIds) {
+    const evidence = parseTitleBatchEvidence(payload, requestedIds);
+    if (!evidence.complete) {
+      throw new Error("Netflix 影片名称目录数据不完整");
+    }
+    return evidence.titles;
   }
 
   async function fetchCatalogRange(context, language, from, to, signal) {
@@ -275,19 +292,45 @@
       throw new Error(`Netflix 影片名称目录请求失败（${response.status}）`);
     }
 
-    return parseTitleBatch(await response.json(), requestedIds);
+    return parseTitleBatchEvidence(await response.json(), requestedIds);
   }
 
   async function fetchTitleIndex(ids, context, options = {}) {
     const allIds = Array.from(ids || []);
     const titles = new Set();
-    for (let from = 0; from < allIds.length; from += TITLE_BATCH_SIZE) {
-      const batch = allIds.slice(from, from + TITLE_BATCH_SIZE);
-      const batchTitles = await fetchTitleBatch(context, batch, options.signal);
-      batchTitles.forEach((title) => titles.add(title));
-      await new Promise((resolve) => window.setTimeout(resolve, 15));
+    let pendingIds = allIds;
+    let resolvedSourceCount = 0;
+
+    for (let attempt = 0; attempt < 2 && pendingIds.length; attempt += 1) {
+      const nextPendingIds = [];
+      for (let from = 0; from < pendingIds.length; from += TITLE_BATCH_SIZE) {
+        const batch = pendingIds.slice(from, from + TITLE_BATCH_SIZE);
+        try {
+          const evidence = await fetchTitleBatch(context, batch, options.signal);
+          evidence.titles.forEach((title) => titles.add(title));
+          resolvedSourceCount += evidence.resolvedIds.length;
+          nextPendingIds.push(...evidence.missingIds);
+        } catch (error) {
+          if (options.signal?.aborted || error?.name === "AbortError") {
+            throw error;
+          }
+          // Preserve evidence from successful batches and retry only the
+          // failed IDs. One malformed title must not erase an entire language.
+          nextPendingIds.push(...batch);
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 15));
+      }
+      pendingIds = nextPendingIds;
+      if (pendingIds.length && attempt === 0) {
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
     }
-    return { titles, sourceCount: allIds.length };
+    return {
+      titles,
+      sourceCount: allIds.length,
+      resolvedSourceCount,
+      complete: pendingIds.length === 0
+    };
   }
 
   async function fetchLanguageIndex(code, context, options = {}) {
@@ -317,26 +360,31 @@
     let titlesComplete = false;
     let titleSourceCount = 0;
     if (complete && ids.size) {
-      for (let attempt = 0; attempt < 2 && !titlesComplete; attempt += 1) {
-        try {
-          const titleIndex = await fetchTitleIndex(ids, context, options);
-          titles = titleIndex.titles;
-          titleSourceCount = titleIndex.sourceCount;
-          titlesComplete = true;
-        } catch (error) {
-          if (options.signal?.aborted || error?.name === "AbortError") {
-            throw error;
-          }
-          if (attempt === 0) {
-            await new Promise((resolve) => window.setTimeout(resolve, 250));
-          }
-          // Numeric IDs remain authoritative. Name matching fails open after
-          // two bounded attempts and can be retried with the manual refresh.
+      try {
+        const titleIndex = await fetchTitleIndex(ids, context, options);
+        titles = titleIndex.titles;
+        titleSourceCount = titleIndex.resolvedSourceCount;
+        titlesComplete = titleIndex.complete;
+      } catch (error) {
+        if (options.signal?.aborted || error?.name === "AbortError") {
+          throw error;
         }
+        // Numeric IDs remain authoritative. Partial name evidence is retained
+        // by fetchTitleIndex; a total envelope failure remains fail-open.
       }
     }
 
-    return { code, ids, complete, titles, titlesComplete, titleSourceCount };
+    return {
+      code,
+      ids,
+      complete,
+      titles,
+      titlesComplete,
+      titleSourceCount,
+      ...(!complete ? {
+        error: `字幕目录超过安全读取上限（${MAX_CATALOG_ITEMS.toLocaleString()} 部），数据不完整`
+      } : {})
+    };
   }
 
   function validCacheRecord(
@@ -349,19 +397,21 @@
     const builtAt = Number(record?.builtAt);
     return Boolean(
       record
-      && record.version === 4
+      && record.version === 5
       && record.generation === generation
       && record.code === code
       && record.scope === scope
       && record.genreId === config.LANGUAGES[code]?.genreId
       && record.complete === true
       && Array.isArray(record.ids)
+      && record.ids.length > 0
       && record.ids.length <= MAX_CATALOG_ITEMS
       && record.ids.every((id) => typeof id === "string" && /^\d{4,20}$/.test(id))
       && new Set(record.ids).size === record.ids.length
       && typeof record.titlesComplete === "boolean"
       && Number.isInteger(record.titleSourceCount)
       && record.titleSourceCount >= 0
+      && record.titleSourceCount <= record.ids.length
       && Array.isArray(record.titles)
       && record.titles.length <= MAX_CATALOG_ITEMS
       && (record.titlesComplete !== true || record.titles.length > 0)
@@ -403,21 +453,27 @@
   }
 
   function preserveStalePositiveTitles(result, staleRecord) {
+    const resultIds = new Set(result?.ids || []);
+    const staleIds = new Set(Array.isArray(staleRecord?.ids) ? staleRecord.ids : []);
     if (
       !result?.complete
       || result.titlesComplete === true
-      || staleRecord?.titlesComplete !== true
-      || !Array.isArray(staleRecord.titles)
+      || !Array.isArray(staleRecord?.titles)
       || staleRecord.titles.length === 0
+      || resultIds.size !== staleIds.size
+      || Array.from(resultIds).some((id) => !staleIds.has(id))
     ) {
       return result;
     }
 
     return {
       ...result,
-      titles: new Set(staleRecord.titles),
+      titles: new Set([
+        ...Array.from(result.titles || []),
+        ...staleRecord.titles
+      ]),
       titlesComplete: false,
-      titleSourceCount: Number(staleRecord.titleSourceCount || 0),
+      titleSourceCount: Number(result.titleSourceCount || 0),
       staleTitles: true
     };
   }
@@ -589,15 +645,22 @@
     return null;
   }
 
-  function positiveOnlyIndex(result, message) {
+  function uncachedFetchedIndex(result, message) {
     return {
       ...result,
-      complete: false,
-      titlesComplete: false,
       cached: false,
-      stale: true,
-      error: message
+      uncached: true,
+      cacheError: message
     };
+  }
+
+  function languageIndexError(index) {
+    if (index?.complete === true) {
+      return null;
+    }
+    const error = new Error(index?.error || "Netflix 字幕目录数据不完整，已暂时保留未知影片");
+    error.name = "IncompleteCatalogError";
+    return error;
   }
 
   async function readFreshRecord(item, generation, refreshAt) {
@@ -699,7 +762,12 @@
         && cacheNeedsAutoRefresh(record, validAutoRefreshAt);
       if (!options.force && recordIsValid && !refreshDue) {
         indexes[code] = cacheRecordToIndex(record, true);
-        options.onLanguageReady?.({ code, cached: true, count: record.ids.length });
+        options.onLanguageReady?.({
+          code,
+          cached: true,
+          count: record.ids.length,
+          index: indexes[code]
+        });
       } else {
         pending.push({
           code,
@@ -736,7 +804,8 @@
               code: item.code,
               cached: true,
               count: cachedIndex.ids.size,
-              complete: true
+              complete: true,
+              index: cachedIndex
             });
             continue;
           }
@@ -760,7 +829,7 @@
             const ids = Array.from(result.ids);
             const titles = Array.from(result.titles || []);
             const record = {
-              version: 4,
+              version: 5,
               generation,
               code: item.code,
               scope: context.scope,
@@ -793,11 +862,11 @@
                 );
                 effectiveIndex = winner
                   ? cacheRecordToIndex(winner, true)
-                  : positiveOnlyIndex(result, "字幕目录由另一个页面更新，等待下次同步");
+                  : uncachedFetchedIndex(result, "字幕目录由另一个页面更新，等待下次同步");
               } else if (!writeResult?.ok) {
-                effectiveIndex = positiveOnlyIndex(
+                effectiveIndex = uncachedFetchedIndex(
                   result,
-                  "字幕目录缓存状态已变化，已仅保留确认匹配的影片"
+                  "字幕目录缓存状态已变化，本页将继续使用刚读取的完整目录"
                 );
               } else if (
                 writeResult?.record
@@ -815,19 +884,29 @@
                 );
               }
             } catch (_error) {
-              effectiveIndex = positiveOnlyIndex(
+              effectiveIndex = uncachedFetchedIndex(
                 result,
-                "字幕目录缓存提交失败，已仅保留确认匹配的影片"
+                "字幕目录缓存提交失败，本页将继续使用刚读取的完整目录"
               );
             }
           }
           indexes[item.code] = effectiveIndex;
-          options.onLanguageReady?.({
-            code: item.code,
-            cached: effectiveIndex.cached === true,
-            count: effectiveIndex.ids.size,
-            complete: effectiveIndex.complete
-          });
+          const incompleteError = languageIndexError(effectiveIndex);
+          if (incompleteError) {
+            options.onLanguageError?.({
+              code: item.code,
+              error: incompleteError,
+              index: effectiveIndex
+            });
+          } else {
+            options.onLanguageReady?.({
+              code: item.code,
+              cached: effectiveIndex.cached === true,
+              count: effectiveIndex.ids.size,
+              complete: true,
+              index: effectiveIndex
+            });
+          }
         } catch (error) {
           if (
             options.signal?.aborted
@@ -856,7 +935,11 @@
               error: failure?.message || "字幕目录读取失败"
             };
           }
-          options.onLanguageError?.({ code: item.code, error: failure });
+          options.onLanguageError?.({
+            code: item.code,
+            error: failure,
+            index: indexes[item.code]
+          });
         } finally {
           leaseHeartbeat.stop();
           bounded.cleanup();
@@ -905,12 +988,15 @@
     buildTitlePath,
     extractVideoIds,
     parseCatalogRange,
+    parseTitleBatchEvidence,
     parseTitleBatch,
     validCacheRecord,
     pruneCache,
     cacheRecordStorageKey,
     cacheNeedsAutoRefresh,
     normalizeLanguageLoadError,
+    uncachedFetchedIndex,
+    languageIndexError,
     preserveStalePositiveTitles,
     cacheRecordToIndex,
     fetchLanguageIndex,
