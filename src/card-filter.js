@@ -347,7 +347,7 @@
   }
 
   function addBadge(root, languageCodes) {
-    if (!state.filter.showBadges || !languageCodes.length) {
+    if (!languageCodes.length) {
       return;
     }
 

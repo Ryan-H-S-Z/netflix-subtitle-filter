@@ -22,7 +22,7 @@
   const MAX_UNIQUE_LANGUAGES = 8;
 
   const DEFAULT_CARD_FILTER = Object.freeze({
-    version: 2,
+    version: 3,
     enabled: false,
     showBadges: true,
     unsupportedMode: UNSUPPORTED_MODE_HIDE,
@@ -38,6 +38,10 @@
 
   function normalizeFilter(value, explicitCodes) {
     const knownCodes = knownLanguageCodes(explicitCodes);
+    const sourceVersion = Number.isFinite(Number(value?.version))
+      ? Number(value.version)
+      : 0;
+    const legacyBadgesOff = sourceVersion < 3 && value?.showBadges === false;
     const hasExplicitGroups = Array.isArray(value?.groups);
     const sourceGroups = hasExplicitGroups
       ? value.groups
@@ -84,10 +88,16 @@
     }
 
     return {
-      version: 2,
+      version: 3,
       enabled: Boolean(value?.enabled) && (!hasExplicitGroups || hasValidGroups),
-      showBadges: value?.showBadges !== false,
-      unsupportedMode: value?.unsupportedMode === UNSUPPORTED_MODE_MARK
+      // Kept in storage for backward compatibility. Language evidence is now
+      // always shown so an old false value cannot silently remove card info.
+      showBadges: true,
+      // In v1/v2, turning language badges off was the closest available
+      // expression of "show all cards without positive labels". Migrate that
+      // preference to the new show-and-red-mark mode.
+      unsupportedMode: legacyBadgesOff
+        || value?.unsupportedMode === UNSUPPORTED_MODE_MARK
         ? UNSUPPORTED_MODE_MARK
         : UNSUPPORTED_MODE_HIDE,
       groups
@@ -197,8 +207,12 @@
     return {
       hidden: isUnsupported && !markUnsupported,
       markUnsupported,
-      showLanguageBadge: !isUnsupported && filter?.showBadges !== false
+      showLanguageBadge: !isUnsupported
     };
+  }
+
+  function unsupportedModeFromHideToggle(hideUnsupported) {
+    return hideUnsupported ? UNSUPPORTED_MODE_HIDE : UNSUPPORTED_MODE_MARK;
   }
 
   return Object.freeze({
@@ -218,6 +232,7 @@
     combineOr,
     combineAnd,
     evaluateTitle,
-    resolveCardDisplay
+    resolveCardDisplay,
+    unsupportedModeFromHideToggle
   });
 });

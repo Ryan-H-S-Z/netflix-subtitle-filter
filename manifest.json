@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Netflix 浏览页字幕筛选助手",
+  "name": "Netflix Subtitle Filter",
   "version": "1.0.3",
-  "description": "在 Netflix 各浏览页面按任意或同时满足的字幕语言条件自动筛选影片，并可在播放页导入本地字幕。",
+  "description": "Filter Netflix browsing cards by subtitle-language rules and import local subtitles on playback pages.",
   "minimum_chrome_version": "114",
   "permissions": [
     "storage",
@@ -12,7 +12,7 @@
     "https://www.netflix.com/*"
   ],
   "action": {
-    "default_title": "Netflix 浏览页字幕筛选助手",
+    "default_title": "Netflix Subtitle Filter",
     "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "assets/icon-16.png",

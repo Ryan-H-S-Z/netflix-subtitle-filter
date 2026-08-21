@@ -9,7 +9,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function createUiI18n() {
   "use strict";
 
-  const DEFAULT_UI_LANGUAGE = "zh-hans";
+  const DEFAULT_UI_LANGUAGE = "en";
   const UI_LANGUAGE_TAGS = Object.freeze({
     "zh-hans": "zh-CN",
     "zh-hant": "zh-TW",
@@ -18,9 +18,9 @@
 
   const messages = Object.freeze({
     "zh-hans": Object.freeze({
-      documentTitle: "Netflix 浏览页字幕筛选助手",
-      headerTitle: "Netflix 字幕筛选",
-      headerSubtitle: "自动隐藏已确认不符合字幕条件的影片",
+      documentTitle: "Netflix Subtitle Filter",
+      headerTitle: "Netflix Subtitle Filter",
+      headerSubtitle: "按字幕条件筛选并标注影片",
       statusSettingsLoading: "正在读取当前设置…",
       uiLanguage: "界面语言",
       uiLanguageHint: "用于设置弹窗、筛选状态和影片语言标签",
@@ -44,12 +44,8 @@
       differentBoxLabel: "不同框：",
       differentBoxText: "每个框都必须满足",
       addGroup: "＋ 增加一个“还必须包含”的条件",
-      showBadges: "在影片卡片显示匹配语言",
-      showBadgesHint: "仅显示您条件中已确认支持的语言",
-      unsupportedModeLabel: "已确认不符合条件的影片",
-      unsupportedModeHint: "资料未知的影片始终保持显示，避免误判",
-      unsupportedModeHide: "隐藏卡片",
-      unsupportedModeMark: "显示并标红",
+      unsupportedModeLabel: "隐藏不符合字幕条件的影片",
+      unsupportedModeHint: "关闭后保留并标红已确认不符合项；资料未知影片不标红",
       saveApply: "保存并立即筛选",
       saving: "正在保存并读取…",
       manualRefresh: "结果不对？清除全部缓存并重新读取",
@@ -127,14 +123,14 @@
       pageLoadingCatalogs: "正在读取字幕目录 {ready} / {total}",
       pageLoadingLanguage: "正在读取{language}字幕目录 · {count} 部",
       pageConfirmedSubtitles: "已确认字幕：{languages}",
-      pageUnsupportedBadge: "不符合条件",
+      pageUnsupportedBadge: "不符合所选字幕",
       pageUnsupportedBadgeTitle: "已确认不符合所选字幕条件",
       pageCachedSuffix: " · 已使用缓存"
     }),
     "zh-hant": Object.freeze({
-      documentTitle: "Netflix 瀏覽頁字幕篩選助手",
-      headerTitle: "Netflix 字幕篩選",
-      headerSubtitle: "自動隱藏已確認不符合字幕條件的影片",
+      documentTitle: "Netflix Subtitle Filter",
+      headerTitle: "Netflix Subtitle Filter",
+      headerSubtitle: "依字幕條件篩選並標示影片",
       statusSettingsLoading: "正在讀取目前設定…",
       uiLanguage: "介面語言",
       uiLanguageHint: "用於設定彈窗、篩選狀態和影片語言標籤",
@@ -158,12 +154,8 @@
       differentBoxLabel: "不同框：",
       differentBoxText: "每個框都必須滿足",
       addGroup: "＋ 增加一個「還必須包含」的條件",
-      showBadges: "在影片卡片顯示符合語言",
-      showBadgesHint: "只顯示條件中已確認支援的語言",
-      unsupportedModeLabel: "已確認不符合條件的影片",
-      unsupportedModeHint: "資料未知的影片一律保持顯示，避免誤判",
-      unsupportedModeHide: "隱藏卡片",
-      unsupportedModeMark: "顯示並標紅",
+      unsupportedModeLabel: "隱藏不符合字幕條件的影片",
+      unsupportedModeHint: "關閉後保留並標紅已確認不符合項；資料未知影片不標紅",
       saveApply: "儲存並立即篩選",
       saving: "正在儲存並讀取…",
       manualRefresh: "結果不對？清除全部快取並重新讀取",
@@ -241,14 +233,14 @@
       pageLoadingCatalogs: "正在讀取字幕目錄 {ready} / {total}",
       pageLoadingLanguage: "正在讀取{language}字幕目錄 · {count} 部",
       pageConfirmedSubtitles: "已確認字幕：{languages}",
-      pageUnsupportedBadge: "不符合條件",
+      pageUnsupportedBadge: "不符合所選字幕",
       pageUnsupportedBadgeTitle: "已確認不符合所選字幕條件",
       pageCachedSuffix: " · 已使用快取"
     }),
     en: Object.freeze({
       documentTitle: "Netflix Subtitle Filter",
       headerTitle: "Netflix Subtitle Filter",
-      headerSubtitle: "Automatically hide titles confirmed not to match your subtitle rules",
+      headerSubtitle: "Filter and label titles by subtitle rules",
       statusSettingsLoading: "Loading settings…",
       uiLanguage: "Interface language",
       uiLanguageHint: "Used for settings, filter status, and language badges",
@@ -272,12 +264,8 @@
       differentBoxLabel: "Between boxes:",
       differentBoxText: "every box must match",
       addGroup: "+ Add another required group",
-      showBadges: "Show matching languages on cards",
-      showBadgesHint: "Only shows selected languages confirmed for that title",
-      unsupportedModeLabel: "Titles confirmed not to match",
-      unsupportedModeHint: "Titles with unknown data always remain visible to avoid false results",
-      unsupportedModeHide: "Hide cards",
-      unsupportedModeMark: "Show with red tag",
+      unsupportedModeLabel: "Hide titles that do not meet the subtitle rule",
+      unsupportedModeHint: "When off, keep and mark confirmed non-matches in red; unknown titles remain unmarked",
       saveApply: "Save and filter now",
       saving: "Saving and loading…",
       manualRefresh: "Wrong results? Clear all cache and reload",
@@ -355,7 +343,7 @@
       pageLoadingCatalogs: "Loading subtitle catalogs {ready} / {total}",
       pageLoadingLanguage: "Loading {language} subtitles · {count} titles",
       pageConfirmedSubtitles: "Confirmed subtitles: {languages}",
-      pageUnsupportedBadge: "Doesn't match",
+      pageUnsupportedBadge: "Subtitle rule not met",
       pageUnsupportedBadgeTitle: "Confirmed not to match the selected subtitle rule",
       pageCachedSuffix: " · cached"
     })

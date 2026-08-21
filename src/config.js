@@ -68,7 +68,7 @@
   });
 
   const CATALOG_CACHE_KEY = "nchCatalogCacheV1";
-  const DEFAULT_UI_LANGUAGE = "zh-hans";
+  const DEFAULT_UI_LANGUAGE = "en";
   const DEFAULT_WEEKLY_CACHE_REFRESH = false;
   const WEEKLY_CACHE_REFRESH_KEY = "weeklyCacheRefresh";
   const CATALOG_LAST_AUTO_REFRESH_KEY = "nchCatalogLastAutoRefreshAt";
