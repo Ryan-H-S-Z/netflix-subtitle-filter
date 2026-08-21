@@ -1,111 +1,119 @@
 # Netflix Subtitle Filter
 
-一个不依赖自建服务器的 Chrome Manifest V3 扩展。开启后，它会在 Netflix 首页、电影、节目、最新、分类、我的片单和搜索页筛选影片卡片；已确认不符合字幕条件的影片可选择隐藏，或保留并显示红色标签。播放页仍可加载自己的字幕文件。
+**English** | [简体中文](./README.zh-CN.md)
 
-## 功能
+[Repository](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter) · [Report an issue](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/issues) · [Download releases](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/releases)
 
-- 在 Netflix 首页、电影、节目、最新、分类、我的片单和搜索页自动筛选现有影片卡片
-- 兼容首页的新卡片布局及电影/节目页的轮播布局；电影按影片编号匹配，电视剧按整部节目编号或精确节目名匹配
-- 全局开启或关闭；关闭后立即恢复卡片，但不会删除字幕目录缓存
-- 规则保存一次即可，刷新页面、切换分类或下次打开 Netflix 时会自动应用
-- 多语言布尔条件：同一个条件组使用 OR（或），不同条件组使用 AND（且）
-- 支持 `(繁中 OR 简中) AND 英文`、`(繁中 OR 简中) AND 泰文` 等组合
-- 提供“简中 + 英文”和“繁中 + 英文”双语字幕快捷条件
-- 提供“中文 + 泰文”快捷条件，即中文任选一种，同时必须有泰语字幕
-- 新安装默认使用 English；设置界面可切换 English、简体中文或繁體中文，筛选进度与影片语言标签会同步切换
-- 匹配影片始终显示已确认支持的所选字幕语言；其他条件仍未知时也保留已确认标签
-- “隐藏不符合字幕条件的影片”开启时隐藏已确认不符合项；关闭时保留卡片并显示红色“不符合所选字幕”标签
-- 可选择约每周自动更新当前规则使用的字幕目录；关闭时只在手动点击后更新
-- 目录数据不完整或读取失败时保留影片，避免把未知影片误判为不支持
-- 提供常用预设，并支持英语、泰语、日语、韩语、欧洲与亚洲多种字幕语言
-- 播放页导入本地 `.srt`、`.vtt`、`.ass`、`.ssa` 字幕
-- 支持 UTF-8、GB18030、Big5 和 UTF-16 LE 文件编码
-- 可调整字幕提前/延后、字体大小、显示高度和黑色底纹
-- 支持 Netflix 播放器全屏；若浏览器直接将视频元素全屏，会临时改用浏览器原生字幕轨道
-- 字幕文件仅由浏览器在本地读取，不会上传到任何服务器
+A Chrome Manifest V3 extension that works without a separate server. Once enabled, it filters title cards on Netflix Home, Movies, TV Shows, New & Popular, genre, My List, and search pages. Titles confirmed not to meet your subtitle requirements can either be hidden or kept with a red warning label. You can also load your own subtitle files on playback pages.
 
-## 安装
+## Features
 
-### 从 GitHub Release 下载
+- Automatically filters existing Netflix title cards on Home, Movies, TV Shows, New & Popular, genre, My List, and search pages
+- Supports both the newer Home card layout and the carousel layout used on Movies and TV Shows pages; movies are matched by Netflix title ID, while series are matched by show ID or exact show name
+- Can be enabled or disabled globally; disabling it immediately restores all cards without deleting the subtitle catalog cache
+- Saves rules once and automatically reapplies them after a refresh, category change, or future Netflix visit
+- Supports Boolean language rules: languages within one condition group use OR, while separate condition groups use AND
+- Supports combinations such as `(Traditional Chinese OR Simplified Chinese) AND English` and `(Traditional Chinese OR Simplified Chinese) AND Thai`
+- Includes bilingual presets for Simplified Chinese + English and Traditional Chinese + English
+- Includes a Chinese + Thai preset, which requires Thai plus either Chinese variant
+- Defaults to English on a new installation; the interface, progress messages, and title-card labels can be switched between English, Simplified Chinese, and Traditional Chinese
+- Always shows confirmed matching subtitle languages on title cards, including confirmed languages when other parts of a rule are still unknown
+- When **Hide titles that do not meet the subtitle rule** is enabled, confirmed non-matches are hidden; when disabled, they remain visible with a red **Subtitle rule not met** label
+- Can refresh only the subtitle catalogs used by the current rule approximately once a week; disabling automatic refresh stops time-based updates, while a manual refresh remains available
+- Keeps titles visible when catalog data is incomplete or cannot be read, preventing unknown titles from being incorrectly treated as unsupported
+- Provides common presets and supports English, Thai, Japanese, Korean, and many other European and Asian subtitle languages
+- Imports local `.srt`, `.vtt`, `.ass`, and `.ssa` subtitle files on playback pages
+- Supports UTF-8, GB18030, Big5, and UTF-16 LE subtitle encodings
+- Lets you adjust subtitle timing, font size, vertical position, and dark background
+- Supports Netflix player fullscreen; if the browser makes the video element itself fullscreen, the extension temporarily uses a native browser subtitle track
+- Reads subtitle files locally in the browser and never uploads them to a server
 
-1. 打开 [最新版本下载页](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/releases/latest)。
-2. 在 **Assets** 中下载 `netflix-home-subtitle-filter-v1.0.4.zip`，然后解压。
-3. 在 Chrome 地址栏打开 `chrome://extensions/`。
-4. 打开右上角的“开发者模式”。
-5. 点击“加载已解压的扩展程序”，选择刚才解压出的文件夹。
+## Installation
 
-Chrome 不能直接安装普通 ZIP，因此必须先解压。以后发布新版本时，可从同一个“最新版本下载页”获取新的 ZIP。
+### Install from a GitHub release
 
-### 从源码文件夹安装
+1. Open the [latest release](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/releases/latest).
+2. Under **Assets**, download the file named `netflix-home-subtitle-filter-vX.Y.Z.zip`, then extract it.
+3. Open `chrome://extensions/` in Chrome.
+4. Enable **Developer mode** in the upper-right corner.
+5. Select **Load unpacked** and choose the extracted folder.
 
-1. 在 Chrome 地址栏打开 `chrome://extensions/`。
-2. 打开右上角的“开发者模式”。
-3. 点击“加载已解压的扩展程序”。
-4. 选择本项目文件夹：`netflix-home-subtitle-filter`。
-5. 刷新已经打开的 Netflix 页面。
+Chrome cannot install this ordinary ZIP directly, so it must be extracted first. Future versions can be downloaded from the same latest-release page.
 
-## 使用
+### Install from the source folder
 
-在任意页面点击 Chrome 工具栏里的扩展图标：
+1. Open `chrome://extensions/` in Chrome.
+2. Enable **Developer mode** in the upper-right corner.
+3. Select **Load unpacked**.
+4. Choose this project's `netflix-home-subtitle-filter` folder.
+5. Refresh any Netflix tabs that were already open.
 
-1. 打开“自动筛选”开关。
-2. 直接选择“有中文即可”等快捷条件，或在同一个框里放入“任意一种即可”的字幕语言。
-3. 如需同时包含另一类字幕，点击“增加一个还必须包含的条件”。
-4. 使用“隐藏不符合字幕条件的影片”开关：开启时隐藏，关闭时保留并标红。
-5. 点击红色的“保存并立即筛选”。
+## Usage
 
-弹窗顶部带地球图标的语言入口可选择简体中文、繁體中文或 English，即使看不懂当前文字也能识别。“中文 + 泰文”快捷条件表示 `(繁中 OR 简中) AND 泰文`，不是三种语言任选其一。
+Click the extension icon in the Chrome toolbar from any page:
 
-例如，第一组选择“繁體中文、简体中文”，第二组选择“英语”，规则就是 `(繁中 OR 简中) AND 英文`。Netflix 右下角会显示目录读取进度；第一次读取会同时建立精简的影片编号与节目名称索引，完成后会长期保存在本机。
+1. Turn on **Automatic filtering**.
+2. Choose a preset such as **Any Chinese**, or place interchangeable subtitle languages in the same condition group.
+3. To require another type of subtitle as well, select **+ Add another required group**.
+4. Choose how to handle confirmed non-matches with **Hide titles that do not meet the subtitle rule**: enable it to hide them, or disable it to keep them visible with a red label.
+5. Select the red **Save and filter now** button.
 
-启用状态和规则保存在 `chrome.storage.sync`，所以不需要每次点击“保存并立即筛选”。进入支持的 Netflix 页面时扩展会自动启动；Netflix 单页切换和懒加载的新卡片也会自动重新筛选。安装新版本或在扩展管理页重新加载扩展后，已经打开的 Netflix 标签页需要手动刷新一次。
+The globe icon at the top of the popup opens the interface-language selector, so it remains recognizable even if you cannot read the current language. The Chinese + Thai preset means `(Traditional Chinese OR Simplified Chinese) AND Thai`; it does not mean that any one of the three languages is enough.
 
-影片编号和规范化节目名称目录保存在 `chrome.storage.local`，并按地区、Netflix 资料、Netflix 界面语言和字幕语言分开：首页、电影、节目、分类、片单、最新和搜索页会共用同一份缓存。关闭“每周自动更新字幕资料”时，缓存不会因时间自动过期；只有手动点击“清除全部缓存并重新读取”，或地区/资料发生变化时才会重新下载。
+For example, place Traditional Chinese and Simplified Chinese in the first group and English in the second group to create `(Traditional Chinese OR Simplified Chinese) AND English`. Netflix displays catalog-loading progress in the lower-right corner. The first load also builds compact title-ID and show-name indexes that are stored locally for later visits.
 
-开启每周更新后，Chrome 会使用扩展定时任务约每 7 天写入一次更新标记。扩展只重新读取当前筛选规则实际使用、且建立时间早于该标记的语言缓存；未选语言不会下载。若到期时没有打开 Netflix，会在下次进入浏览页时更新。电脑休眠期间 Chrome 不会被任务唤醒，因此实际执行时间可能延后。
+The enabled state and filtering rules are stored in `chrome.storage.sync`, so you do not need to select **Save and filter now** every time. The extension starts automatically on supported Netflix pages and rechecks cards added through Netflix's single-page navigation and lazy loading. After installing a new extension version or reloading it from the Extensions page, refresh Netflix tabs that were already open once.
 
-Netflix 当前目录响应没有可靠的 `updatedSince`、集合版本或变更游标，所以无法在保证新增与下架都正确的情况下只下载“变化的影片”。扩展采用的节省资源方案是按语言和时间选择性更新，但到期语言仍会完整核对其编号目录。更新失败时，旧缓存只用于确认已知匹配，不会用旧的缺席结果隐藏影片。
+Title-ID and normalized show-name indexes are stored in `chrome.storage.local`. They are separated by region, Netflix profile, Netflix interface language, and subtitle language. Home, Movies, TV Shows, genre, My List, New & Popular, and search pages share the appropriate cache. When weekly automatic catalog refresh is disabled, a valid retained cache does not expire solely because time has passed. A catalog may be read again after **Clear all cache and reload**, after region, profile, interface-language, or selected-subtitle-language changes, or when cached data is missing, invalid, migrated, evicted by the extension, or removed by the browser.
 
-若只想要 OR，把所有语言放在同一个条件组。若只想要 AND，则每个条件组只放一种语言。
+When weekly refresh is enabled, a Chrome extension alarm writes an update marker approximately every seven days. The extension reloads only language caches used by the current rule and created before that marker; unselected languages are not downloaded. If Netflix is not open when the update becomes due, the refresh runs the next time you visit a browsing page. Chrome does not wake a sleeping computer for the alarm, so the actual time may be later.
 
-在 Netflix 播放页点击右下角“导入本地字幕”，选择字幕文件即可。文字提示会在 5 秒后自动收起，只保留小图标入口；把鼠标移到右下角、悬停或用键盘聚焦时会再次展开，打开字幕面板期间不会收起。若字幕与画面不同步，可用“字幕提前/字幕延后”每次调整 0.5 秒。
+The Netflix catalog responses used by this extension do not provide a reliable `updatedSince` value, collection version, or change cursor. Therefore, the extension cannot download only changed titles while reliably accounting for both additions and removals. To conserve resources, it refreshes selectively by language and time, but an expired language catalog still requires a complete ID check. If an update fails, the old cache is used only to confirm known matches; an old absence is never used to hide a title.
 
-“自动”编码会在 UTF-8、GB18030 和 Big5 之间判断；若文字仍不正确，可在面板中手动选择编码，当前文件会立即重新读取，不必再次选择。为避免异常文件拖慢播放器，单个字幕文件上限为 16 MB、字幕条目上限为 50,000 条。
+For an OR-only rule, place all languages in one condition group. For an AND-only rule, place one language in each separate group.
 
-在极少数“视频元素直接全屏”的页面中，浏览器不允许普通覆盖层显示在视频之上，因此扩展只把当前正在显示的字幕行临时放入原生字幕轨道；退出全屏后会立即移除。该模式使用浏览器的原生字幕样式，字体大小、背景和高度设置可能暂时不生效。
+On a Netflix playback page, select **Import local subtitles** in the lower-right corner and choose a subtitle file. The text label collapses after five seconds, leaving a compact icon. It expands again when you move the pointer to that corner, hover over it, or focus it with the keyboard, and it stays expanded while the subtitle panel is open. If subtitles are out of sync, use the timing controls to move them earlier or later in 0.5-second steps.
 
-## 筛选原理与隐私
+The **Auto** encoding option distinguishes among UTF-8, GB18030, and Big5. If the text is still incorrect, choose an encoding manually; the current file is decoded again immediately, without selecting it a second time. To prevent unusual files from slowing the player, one subtitle file is limited to 16 MB and 50,000 cues.
 
-Netflix 普通浏览页不会把每张卡片的字幕清单直接写入页面。扩展会使用当前 Netflix 页面已有的登录状态，向 `www.netflix.com` 读取官方“按照语言浏览”目录中的影片编号，再与页面卡片的 Netflix 影片编号比对。请求不会发送到第三方服务器；扩展也不会保存 Cookie、登录令牌或完整 Netflix 响应，只会在 `chrome.storage.local` 保存所选语言对应的精简影片编号缓存。
+On the rare pages where the video element itself enters fullscreen, the browser does not allow a normal overlay above it. The extension therefore places only the currently visible subtitle lines in a temporary native subtitle track and removes it immediately after exiting fullscreen. Native browser styling is used in this mode, so the extension's font-size, background, and position settings may temporarily have no effect.
 
-电影页面的 `/watch/编号` 会直接与官方字幕目录中的影片编号匹配。节目页面的播放编号可能属于某一集，因此扩展不会用单集编号判断整部电视剧：它会优先把分集映射到所属节目；映射不可用时，再用页面显示的节目名与官方字幕目录中的本地化节目名做规范化后的精确匹配。名称不完整、为空或无法确认时会保留卡片，不会模糊猜测。
+## How filtering works and privacy
 
-Netflix 的目录接口并非公开开发者 API，网站更新后可能暂时失效。因此扩展采用 fail-open：只有某个语言目录已确认完整时，“不在目录中”才会被判断为不支持；加载失败、编号无法解析或无法可靠定位外层卡片的项目都会继续显示。弹窗底部仍保留“打开 Netflix 官方字幕目录”作为备用核对方式。
+Regular Netflix browsing pages do not expose every card's subtitle list in the page. Using the Netflix session already present in the current tab, the extension reads title IDs from Netflix's official **Browse by Languages** catalog and compares them with the Netflix title IDs found on page cards. Requests are not sent to a third-party server. The extension does not save cookies, login tokens, or complete Netflix responses; `chrome.storage.local` contains compact title-ID and normalized show-name indexes plus the cache metadata needed to scope and validate them.
 
-扩展只以 CSS 隐藏 Netflix 已挂载的外层卡片节点，不会删除或重建 Netflix 的 React 内容。这样关闭筛选时可以完整恢复，并尽量不破坏轮播按钮、悬浮预览和单页导航。若某一行符合条件的已加载影片很少，Netflix 自己的虚拟轮播不一定会自动从尚未挂载的数据中补满整行，行尾可能保留空白，但已排除的卡片本身不会显示。
+For movies, the ID in `/watch/ID` can be compared directly with the official subtitle catalog. A series playback ID may belong to one episode, so the extension does not use an episode ID to judge the entire series. It first tries to map the episode to its parent show. If that mapping is unavailable, it compares the show name displayed on the page with localized show names from the official subtitle catalog using normalized exact matching. Cards with missing, incomplete, or uncertain names remain visible instead of being guessed from a fuzzy match.
 
-## 地区说明
+Netflix's catalog interface is not a public developer API and may temporarily stop working after a website update. The extension therefore fails open: absence from a language catalog counts as unsupported only when that catalog is confirmed complete. Titles remain visible if loading fails, their ID cannot be parsed, or the extension cannot safely identify the outer card element. The popup also retains a link to Netflix's official subtitle catalog for manual verification.
 
-Netflix 官方说明，字幕是否可用可能受到所在地、资料语言偏好、具体影片和设备影响。缓存会按当前地区与资料的匿名散列分开；切换资料或地区后会重新读取。这个扩展不会改变地区、绕过授权或下载 Netflix 视频，只会读取账号当前可用的官方字幕目录并显示本地字幕覆盖层。
+The extension hides only outer card elements already mounted by Netflix using CSS; it does not delete or rebuild Netflix's React content. This allows every card to be restored when filtering is disabled and reduces interference with carousel controls, hover previews, and single-page navigation. If a row contains only a few matching cards, Netflix's virtual carousel may not mount additional items to fill the row, so empty space can remain at the end even though excluded cards themselves are hidden.
 
-电视剧筛选按整部节目是否被官方语言目录收录，不逐季、逐集验证字幕；因此结果表示该节目在当前地区提供所选字幕，不保证每一集都完全相同。
+## Regional availability
 
-## 开发与测试
+Netflix explains that subtitle availability can depend on location, profile language preferences, the specific title, and the device. Caches are separated by country code and a non-readable hash derived from the current profile and Netflix interface locale; the raw profile ID is not stored. This extension does not change your region, bypass licensing restrictions, or download Netflix video. It reads only the official subtitle catalog currently available to your account and displays local subtitle overlays.
 
-不需要安装 npm 依赖。使用系统自带的 Node.js：
+TV-show filtering checks whether the complete show appears in the official language catalog; it does not verify every season or episode. A result therefore means that the show offers the selected subtitle language in the current region, not that every episode is guaranteed to have identical availability.
+
+## Feedback and bug reports
+
+Please use [GitHub Issues](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/issues) to report bugs, request features, or share compatibility feedback. When reporting a filtering problem, include the Chrome version, Netflix page type, extension version, selected rule, expected result, and actual result when possible. Screenshots are helpful, but never include Netflix cookies, account credentials, or login tokens.
+
+## Development and testing
+
+No npm dependencies are required. With Node.js installed, run:
 
 ```bash
 npm test
 npm run check
 ```
 
-参考资料：
+References:
 
-- [Netflix：为什么某种字幕或音频语言不可用](https://help.netflix.com/en/node/101798)
-- [Netflix：如何搜索和浏览](https://help.netflix.com/en/node/47765)
-- [Chrome：Manifest 文件格式](https://developer.chrome.com/docs/extensions/mv3/manifest)
-- [Chrome：Alarms API](https://developer.chrome.com/docs/extensions/reference/api/alarms)
+- [Netflix: Why subtitles or audio aren't available in a specific language](https://help.netflix.com/en/node/101798)
+- [Netflix: How to search and browse Netflix](https://help.netflix.com/en/node/47765)
+- [Chrome: Manifest file format](https://developer.chrome.com/docs/extensions/mv3/manifest)
+- [Chrome: Alarms API](https://developer.chrome.com/docs/extensions/reference/api/alarms)
 
-## 免责声明
+## Disclaimer
 
-本项目与 Netflix, Inc. 无关联。Netflix 是其各自权利人的商标。
+This project is not affiliated with Netflix, Inc. Netflix is a trademark of its respective owner.
