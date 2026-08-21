@@ -7,8 +7,7 @@
   const rules = globalThis.NetflixSubtitleFilterRules;
   const catalog = globalThis.NetflixSubtitleCatalog;
   const filterEnabledInput = document.getElementById("filter-enabled");
-  const showBadgesInput = document.getElementById("show-badges");
-  const unsupportedModeInput = document.getElementById("unsupported-mode");
+  const hideUnsupportedInput = document.getElementById("hide-unsupported");
   const groupsContainer = document.getElementById("filter-groups");
   const addGroupButton = document.getElementById("add-group");
   const applyFilterButton = document.getElementById("apply-filter");
@@ -157,8 +156,7 @@
     uiLanguageSelect.disabled = locked;
     weeklyCacheRefreshInput.disabled = locked;
     filterEnabledInput.disabled = locked;
-    showBadgesInput.disabled = locked;
-    unsupportedModeInput.disabled = locked;
+    hideUnsupportedInput.disabled = locked;
     presetButtons.forEach((button) => {
       button.disabled = locked;
     });
@@ -402,8 +400,8 @@
       const filterToSave = rules.normalizeFilter({
         ...filterDraft,
         enabled: filterEnabledInput.checked,
-        showBadges: showBadgesInput.checked,
-        unsupportedMode: unsupportedModeInput.value
+        showBadges: true,
+        unsupportedMode: rules.unsupportedModeFromHideToggle(hideUnsupportedInput.checked)
       });
       filterDraft = filterToSave;
       await chrome.storage.sync.set({ cardFilter: filterToSave });
@@ -474,13 +472,7 @@
     saveFilter("toggleFailed");
   });
 
-  showBadgesInput.addEventListener("change", () => {
-    if (initialized) {
-      markFilterDraftChanged();
-    }
-  });
-
-  unsupportedModeInput.addEventListener("change", () => {
+  hideUnsupportedInput.addEventListener("change", () => {
     if (initialized) {
       markFilterDraftChanged();
     }
@@ -684,8 +676,7 @@
     filterEnabledInput.checked = filterDraft.enabled;
     filterDraftDirty = false;
     updateFilterStateLabel();
-    showBadgesInput.checked = filterDraft.showBadges;
-    unsupportedModeInput.value = filterDraft.unsupportedMode;
+    hideUnsupportedInput.checked = filterDraft.unsupportedMode === rules.UNSUPPORTED_MODE_HIDE;
     showFloatingInput.checked = Boolean(settings.showFloatingButton);
 
     const preferredInput = preferredLanguageInputs.find((input) => input.value === preferredLanguage);
@@ -717,6 +708,7 @@
     });
   }
 
+  applyStaticTranslations();
   syncControlStates();
   chrome.storage.sync.get(storageDefaults).then((settings) => {
     finishInitialization(settings);

@@ -25,10 +25,10 @@ test("normalizes legacy group objects, duplicate languages, and empty groups", (
   });
 
   assert.deepEqual(result, {
-    version: 2,
+    version: 3,
     enabled: true,
-    showBadges: false,
-    unsupportedMode: rules.UNSUPPORTED_MODE_HIDE,
+    showBadges: true,
+    unsupportedMode: rules.UNSUPPORTED_MODE_MARK,
     groups: [["zh-hant"], ["en"]]
   });
 });
@@ -48,10 +48,53 @@ test("migrates legacy unsupported-card behavior to hide and accepts mark mode", 
     unsupportedMode: "unexpected"
   });
 
-  assert.equal(legacy.version, 2);
+  assert.equal(legacy.version, 3);
   assert.equal(legacy.unsupportedMode, rules.UNSUPPORTED_MODE_HIDE);
   assert.equal(marked.unsupportedMode, rules.UNSUPPORTED_MODE_MARK);
   assert.equal(invalid.unsupportedMode, rules.UNSUPPORTED_MODE_HIDE);
+});
+
+test("migrates the old unchecked language-badge setting to show-and-mark mode", () => {
+  const cases = [
+    {
+      input: { version: 2, showBadges: false, unsupportedMode: "hide" },
+      expected: rules.UNSUPPORTED_MODE_MARK
+    },
+    {
+      input: { version: 2, showBadges: true, unsupportedMode: "hide" },
+      expected: rules.UNSUPPORTED_MODE_HIDE
+    },
+    {
+      input: { version: 2, showBadges: false, unsupportedMode: "mark" },
+      expected: rules.UNSUPPORTED_MODE_MARK
+    },
+    {
+      input: { version: 3, showBadges: false, unsupportedMode: "hide" },
+      expected: rules.UNSUPPORTED_MODE_HIDE
+    }
+  ];
+
+  for (const { input, expected } of cases) {
+    const normalized = rules.normalizeFilter({
+      ...input,
+      enabled: true,
+      groups: [["en"]]
+    });
+    assert.equal(normalized.version, 3);
+    assert.equal(normalized.showBadges, true);
+    assert.equal(normalized.unsupportedMode, expected);
+  }
+});
+
+test("maps the hide toggle to hide when checked and red-mark when unchecked", () => {
+  assert.equal(
+    rules.unsupportedModeFromHideToggle(true),
+    rules.UNSUPPORTED_MODE_HIDE
+  );
+  assert.equal(
+    rules.unsupportedModeFromHideToggle(false),
+    rules.UNSUPPORTED_MODE_MARK
+  );
 });
 
 test("resolves unsupported cards to either hide or a red-mark policy", () => {
@@ -104,11 +147,18 @@ test("unknown cards fail open and display policies do not retain the prior mode"
   assert.deepEqual(unknown, {
     hidden: false,
     markUnsupported: false,
-    showLanguageBadge: false
+    showLanguageBadge: true
   });
+  assert.deepEqual(
+    rules.resolveCardDisplay(rules.UNKNOWN, {
+      unsupportedMode: rules.UNSUPPORTED_MODE_HIDE,
+      showBadges: true
+    }),
+    unknown
+  );
 });
 
-test("matching and partially known cards honor the language-badge toggle", () => {
+test("matching and partially known cards always expose confirmed language evidence", () => {
   for (const resultState of [rules.MATCH, rules.UNKNOWN]) {
     assert.deepEqual(rules.resolveCardDisplay(resultState, { showBadges: true }), {
       hidden: false,
@@ -118,7 +168,7 @@ test("matching and partially known cards honor the language-badge toggle", () =>
     assert.deepEqual(rules.resolveCardDisplay(resultState, { showBadges: false }), {
       hidden: false,
       markUnsupported: false,
-      showLanguageBadge: false
+      showLanguageBadge: true
     });
   }
 });

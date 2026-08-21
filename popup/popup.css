@@ -41,15 +41,12 @@ header {
 header > div:last-child { min-width: 0; }
 
 .logo {
-  align-items: center;
-  background: #e50914;
   border-radius: 11px;
   box-shadow: 0 8px 22px rgba(229, 9, 20, .3);
-  display: flex;
-  font-size: 19px;
-  font-weight: 900;
+  display: block;
+  flex: 0 0 42px;
   height: 42px;
-  justify-content: center;
+  object-fit: cover;
   width: 42px;
 }
 
@@ -330,39 +327,10 @@ button.add-group {
   width: 100%;
 }
 
-.badge-toggle {
+.unsupported-mode-toggle {
   border-top: 1px solid rgba(255, 255, 255, .1);
-  padding: 11px 0;
-}
-
-.setting-select-row {
-  align-items: center;
-  border-top: 1px solid rgba(255, 255, 255, .1);
-  display: flex;
-  gap: 10px;
   margin-top: 11px;
   padding: 11px 0;
-}
-
-.setting-select-row span {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.setting-select-row strong { font-size: 12px; }
-.setting-select-row small { color: #999; font-size: 10px; line-height: 1.35; }
-.setting-select-row select {
-  background: #181818;
-  border: 1px solid rgba(255, 255, 255, .16);
-  border-radius: 8px;
-  color: #fff;
-  flex: 0 0 112px;
-  font-size: 10px;
-  min-width: 0;
-  padding: 7px;
 }
 
 .schedule-toggle {
