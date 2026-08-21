@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Netflix Subtitle Filter",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Filter Netflix browsing cards by subtitle-language rules and import local subtitles on playback pages.",
   "minimum_chrome_version": "114",
   "permissions": [
