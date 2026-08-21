@@ -2,7 +2,7 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
-[Repository](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter) · [Report an issue](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/issues) · [Download releases](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/releases)
+[Repository](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter) · [Report an issue](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/issues) · [Download releases](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/releases)
 
 A Chrome Manifest V3 extension that works without a separate server. Once enabled, it filters title cards on Netflix Home, Movies, TV Shows, New & Popular, genre, My List, and search pages. Titles confirmed not to meet your subtitle requirements can either be hidden or kept with a red warning label. You can also load your own subtitle files on playback pages.
 
@@ -32,8 +32,8 @@ A Chrome Manifest V3 extension that works without a separate server. Once enable
 
 ### Install from a GitHub release
 
-1. Open the [latest release](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/releases/latest).
-2. Under **Assets**, download the file named `netflix-home-subtitle-filter-vX.Y.Z.zip`, then extract it.
+1. Open the [latest release](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/releases/latest).
+2. Under **Assets**, download the file named `netflix-subtitle-filter-vX.Y.Z.zip`, then extract it.
 3. Open `chrome://extensions/` in Chrome.
 4. Enable **Developer mode** in the upper-right corner.
 5. Select **Load unpacked** and choose the extracted folder.
@@ -45,7 +45,7 @@ Chrome cannot install this ordinary ZIP directly, so it must be extracted first.
 1. Open `chrome://extensions/` in Chrome.
 2. Enable **Developer mode** in the upper-right corner.
 3. Select **Load unpacked**.
-4. Choose this project's `netflix-home-subtitle-filter` folder.
+4. Choose this project's `netflix-subtitle-filter` folder.
 5. Refresh any Netflix tabs that were already open.
 
 ## Usage
@@ -96,7 +96,7 @@ TV-show filtering checks whether the complete show appears in the official langu
 
 ## Feedback and bug reports
 
-Please use [GitHub Issues](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/issues) to report bugs, request features, or share compatibility feedback. When reporting a filtering problem, include the Chrome version, Netflix page type, extension version, selected rule, expected result, and actual result when possible. Screenshots are helpful, but never include Netflix cookies, account credentials, or login tokens.
+Please use [GitHub Issues](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/issues) to report bugs, request features, or share compatibility feedback. When reporting a filtering problem, include the Chrome version, Netflix page type, extension version, selected rule, expected result, and actual result when possible. Screenshots are helpful, but never include Netflix cookies, account credentials, or login tokens.
 
 ## Development and testing
 
