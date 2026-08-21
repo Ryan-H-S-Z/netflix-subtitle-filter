@@ -2,7 +2,7 @@
 
 [English](./README.md) | **简体中文**
 
-[项目主页](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter) · [提交问题或建议](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/issues) · [下载版本](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/releases)
+[项目主页](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter) · [提交问题或建议](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/issues) · [下载版本](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/releases)
 
 一个不依赖自建服务器的 Chrome Manifest V3 扩展。开启后，它会在 Netflix 首页、电影、节目、最新、分类、我的片单和搜索页筛选影片卡片；已确认不符合字幕条件的影片可选择隐藏，或保留并显示红色标签。播放页仍可加载自己的字幕文件。
 
@@ -32,8 +32,8 @@
 
 ### 从 GitHub Release 下载
 
-1. 打开[最新版本下载页](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/releases/latest)。
-2. 在 **Assets** 中下载名称格式为 `netflix-home-subtitle-filter-vX.Y.Z.zip` 的文件，然后解压。
+1. 打开[最新版本下载页](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/releases/latest)。
+2. 在 **Assets** 中下载名称格式为 `netflix-subtitle-filter-vX.Y.Z.zip` 的文件，然后解压。
 3. 在 Chrome 地址栏打开 `chrome://extensions/`。
 4. 打开右上角的“开发者模式”。
 5. 点击“加载已解压的扩展程序”，选择刚才解压出的文件夹。
@@ -45,7 +45,7 @@ Chrome 不能直接安装普通 ZIP，因此必须先解压。以后发布新版
 1. 在 Chrome 地址栏打开 `chrome://extensions/`。
 2. 打开右上角的“开发者模式”。
 3. 点击“加载已解压的扩展程序”。
-4. 选择本项目文件夹：`netflix-home-subtitle-filter`。
+4. 选择本项目文件夹：`netflix-subtitle-filter`。
 5. 刷新已经打开的 Netflix 页面。
 
 ## 使用
@@ -96,7 +96,7 @@ Netflix 官方说明，字幕是否可用可能受到所在地、资料语言偏
 
 ## 反馈与问题报告
 
-请通过 [GitHub Issues](https://github.com/Ryan-H-S-Z/netflix-home-subtitle-filter/issues) 报告错误、提出功能建议或反馈兼容性问题。报告筛选问题时，建议提供 Chrome 版本、Netflix 页面类型、扩展版本、所选规则、预期结果和实际结果；截图也很有帮助，但请勿包含 Netflix Cookie、账号凭据或登录令牌。
+请通过 [GitHub Issues](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/issues) 报告错误、提出功能建议或反馈兼容性问题。报告筛选问题时，建议提供 Chrome 版本、Netflix 页面类型、扩展版本、所选规则、预期结果和实际结果；截图也很有帮助，但请勿包含 Netflix Cookie、账号凭据或登录令牌。
 
 ## 开发与测试
 
