@@ -5,10 +5,13 @@
   const uiI18n = globalThis.NetflixSubtitleUiI18n;
   const rules = globalThis.NetflixSubtitleFilterRules;
   const catalog = globalThis.NetflixSubtitleCatalog;
+  const latestCatalog = globalThis.NetflixSubtitleLatestCatalog;
   const videoIdentity = globalThis.NetflixSubtitleVideoIdentity;
   const metadataChannel = globalThis.NetflixSubtitleMetadataChannel;
   const cardLayout = globalThis.NetflixSubtitleCardLayout;
   const HOST_ID = "nch-card-filter-host";
+  const LATEST_REQUEST_TIMEOUT_MS = 20_000;
+  const LATEST_RETRY_DELAY_MS = 30_000;
   const CARD_LINK_SELECTOR = 'a[href*="jbv="], a[href*="/watch/"], a[href*="/title/"]';
   const CARD_TITLE_TEXT_SELECTOR = cardLayout?.TITLE_TEXT_SELECTORS?.join(",") || "";
   const CARD_TITLE_IMAGE_SELECTOR = cardLayout?.TITLE_IMAGE_SELECTOR || "";
@@ -36,6 +39,7 @@
     || !uiI18n
     || !rules
     || !catalog
+    || !latestCatalog
     || !videoIdentity
     || !metadataChannel
     || !cardLayout
@@ -55,6 +59,7 @@
     videoIdMap: metadataChannel.getMap(),
     loadSequence: 0,
     previousHref: location.href,
+    previousPathname: location.pathname,
     routeActive: isCardRoute(),
     status: {
       phase: "disabled",
@@ -75,7 +80,19 @@
     cacheRebuildTimer: null,
     suppressFilterSignature: null,
     localCacheRefreshActive: false,
-    selfRefreshGeneration: null
+    selfRefreshGeneration: null,
+    latestSyncTimer: null,
+    latestSyncTimerDueAt: null,
+    latestSyncInProgress: false,
+    latestAbortController: null,
+    latestSyncRerunRequested: false,
+    latestSyncRerunDelay: null,
+    latestBackoffUntil: 0,
+    latestCatalogRetryAttempt: 0,
+    latestCatalogBarrier: null,
+    latestSyncSequence: 0,
+    latestProcessedHash: null,
+    pendingLatestIds: new Set()
   };
   const uiLanguageController = uiI18n.createUiLanguageController(
     state.uiLanguage,
@@ -422,9 +439,15 @@
     let unknown = 0;
 
     for (const card of cards) {
-      const result = card.titleId
-        ? rules.evaluateTitle(card.titleId, state.filter, state.indexes, card.title)
-        : rules.evaluateTitle("", state.filter, state.indexes, card.title);
+      const latestRowAwaitingVerification = onLatestRoute()
+        && !state.latestProcessedHash
+        && Boolean(card.root.closest?.('[data-list-context="windowedNewReleases"]'));
+      const result = latestRowAwaitingVerification
+        || (onLatestRoute() && card.titleId && state.pendingLatestIds.has(card.titleId))
+        ? { state: rules.UNKNOWN, matchedLanguages: [] }
+        : (card.titleId
+          ? rules.evaluateTitle(card.titleId, state.filter, state.indexes, card.title)
+          : rules.evaluateTitle("", state.filter, state.indexes, card.title));
       const display = rules.resolveCardDisplay(result.state, state.filter);
       card.root.dataset.nchCardFilterState = result.state;
 
@@ -564,10 +587,16 @@
     });
     if (relevant) {
       scheduleApply();
+      scheduleLatestSync();
     }
   });
 
-  function completeFailedLoad({ indexes = {}, errors = [], retryAttempt = 0 } = {}) {
+  function completeFailedLoad({
+    indexes = {},
+    errors = [],
+    retryAttempt = 0,
+    suppressAutomaticRetry = false
+  } = {}) {
     state.indexes = indexes;
     state.loading = false;
     state.cacheMode = "none";
@@ -576,6 +605,10 @@
     observeDom();
 
     const wasAborted = errors.some((error) => config.isAbortError(error));
+    if (suppressAutomaticRetry) {
+      setLocalizedStatus("error", "filterStatusError");
+      return;
+    }
     const delay = wasAborted ? null : config.catalogRetryDelay(retryAttempt);
     if (delay == null) {
       setLocalizedStatus("error", "filterStatusError");
@@ -595,7 +628,15 @@
     }, delay);
   }
 
-  async function rebuildIndexes({ force = false, retryAttempt = 0 } = {}) {
+  async function rebuildIndexes({
+    force = false,
+    minimumBuiltAt = null,
+    minimumBuiltAtCodes = null,
+    latestEvidence = null,
+    retryAttempt = 0,
+    skipLatestSync = false,
+    latestOwnsRetry = false
+  } = {}) {
     window.clearTimeout(state.retryTimer);
     state.retryTimer = null;
     state.abortController?.abort();
@@ -611,10 +652,19 @@
     state.routeActive = isCardRoute();
     if (!state.filter.enabled || !state.routeActive) {
       setStatus("disabled", "");
+      scheduleLatestSync();
       return statusSnapshot({ started: false });
     }
 
     const selected = rules.getSelectedLanguages(state.filter);
+    if (onLatestRoute() && !skipLatestSync && !state.latestProcessedHash) {
+      setLocalizedStatus("loading", "pageLoadingCatalogs", {
+        ready: 0,
+        total: selected.length
+      });
+      scheduleLatestSync();
+      return statusSnapshot({ started: true });
+    }
     const ready = new Set();
     const cached = new Set();
     const languageErrors = [];
@@ -624,6 +674,9 @@
     try {
       const indexes = await catalog.loadIndexes(selected, {
         force,
+        minimumBuiltAt,
+        minimumBuiltAtCodes,
+        latestEvidence,
         signal: abortController.signal,
         onProgress: ({ code, loaded }) => {
           if (state.loadSequence === sequence) {
@@ -669,26 +722,409 @@
         ? "cached"
         : "updated";
       if (languageErrors.length) {
-        completeFailedLoad({ indexes, errors: languageErrors, retryAttempt });
-        return statusSnapshot();
+        completeFailedLoad({
+          indexes,
+          errors: languageErrors,
+          retryAttempt,
+          suppressAutomaticRetry: latestOwnsRetry
+        });
+        return statusSnapshot({ catalogsReady: false });
       }
       scheduleApply();
-      return statusSnapshot();
+      if (!skipLatestSync) {
+        scheduleLatestSync();
+      }
+      const persistedCodes = selected.filter((code) => (
+        indexes[code]?.complete === true
+        && indexes[code]?.uncached !== true
+      ));
+      return statusSnapshot({
+        catalogsReady: true,
+        catalogsPersisted: persistedCodes.length === selected.length,
+        persistedCodes
+      });
     } catch (error) {
       if (state.loadSequence === sequence) {
-        completeFailedLoad({ errors: [error], retryAttempt });
+        completeFailedLoad({
+          errors: [error],
+          retryAttempt,
+          suppressAutomaticRetry: latestOwnsRetry
+        });
       }
-      return statusSnapshot();
+      return statusSnapshot({ catalogsReady: false });
+    }
+  }
+
+  function onLatestRoute() {
+    return /^\/latest(?:\/|$)/.test(location.pathname);
+  }
+
+  function verifiedLanguages(snapshot) {
+    return new Set(Array.isArray(snapshot?.verifiedLanguages)
+      ? snapshot.verifiedLanguages.filter((code) => config.LANGUAGES[code])
+      : []);
+  }
+
+  function selectedLanguageSignature(codes, snapshot) {
+    return `${snapshot.hash}:${snapshot.ids.join(",")}:${Array.from(codes).sort().join(",")}`;
+  }
+
+  function filterLanguageSignature(filter) {
+    return rules.getSelectedLanguages(filter).slice().sort().join(",");
+  }
+
+  function invalidateLatestSync({ clearPending = true } = {}) {
+    state.latestSyncSequence += 1;
+    state.latestProcessedHash = null;
+    state.latestAbortController?.abort();
+    state.latestAbortController = null;
+    state.latestSyncRerunRequested = false;
+    state.latestSyncRerunDelay = null;
+    state.latestBackoffUntil = 0;
+    state.latestCatalogRetryAttempt = 0;
+    state.latestCatalogBarrier = null;
+    window.clearTimeout(state.latestSyncTimer);
+    state.latestSyncTimer = null;
+    state.latestSyncTimerDueAt = null;
+    if (clearPending) {
+      state.pendingLatestIds.clear();
+    }
+  }
+
+  function scheduleLatestSync(delay = 700) {
+    if (
+      !onLatestRoute()
+      || state.latestProcessedHash
+    ) {
+      return;
+    }
+    const requestedDelay = Math.max(0, Number(delay) || 0);
+    const backoffDelay = Math.max(0, Number(state.latestBackoffUntil) - Date.now());
+    const effectiveDelay = Math.max(requestedDelay, backoffDelay);
+    if (state.latestSyncInProgress) {
+      state.latestSyncRerunRequested = true;
+      state.latestSyncRerunDelay = state.latestSyncRerunDelay === null
+        ? effectiveDelay
+        : Math.min(Number(state.latestSyncRerunDelay), effectiveDelay);
+      return;
+    }
+    if (state.latestSyncTimer) {
+      const requestedDueAt = Date.now() + effectiveDelay;
+      if (Number(state.latestSyncTimerDueAt) <= requestedDueAt) {
+        return;
+      }
+      window.clearTimeout(state.latestSyncTimer);
+      state.latestSyncTimer = null;
+      state.latestSyncTimerDueAt = null;
+    }
+    state.latestSyncTimerDueAt = Date.now() + effectiveDelay;
+    state.latestSyncTimer = window.setTimeout(() => {
+      state.latestSyncTimer = null;
+      state.latestSyncTimerDueAt = null;
+      syncLatestSnapshot().catch(() => undefined);
+    }, effectiveDelay);
+  }
+
+  function scheduleLatestRetry(delay = LATEST_RETRY_DELAY_MS) {
+    const retryDelay = Math.max(0, Number(delay) || 0);
+    state.latestBackoffUntil = Date.now() + retryDelay;
+    if (state.latestSyncInProgress) {
+      // A real request/protocol failure owns the retry delay. Ordinary DOM
+      // mutations must not turn this into a rapid retry loop.
+      state.latestSyncRerunRequested = true;
+      state.latestSyncRerunDelay = retryDelay;
+      return;
+    }
+    scheduleLatestSync(retryDelay);
+  }
+
+  async function syncLatestSnapshot() {
+    if (state.latestSyncInProgress) {
+      state.latestSyncRerunRequested = true;
+      state.latestSyncRerunDelay = state.latestSyncRerunDelay === null
+        ? 700
+        : Math.min(Number(state.latestSyncRerunDelay), 700);
+      return;
+    }
+    if (state.loading || !onLatestRoute()) {
+      return;
+    }
+
+    const sequence = state.latestSyncSequence + 1;
+    state.latestSyncSequence = sequence;
+    state.latestSyncInProgress = true;
+    const latestAbortController = new AbortController();
+    state.latestAbortController = latestAbortController;
+    const latestTimeoutTimer = window.setTimeout(() => {
+      latestAbortController.abort();
+    }, LATEST_REQUEST_TIMEOUT_MS);
+    try {
+      const context = catalog.extractMemberContext(document);
+      const stored = await chrome.runtime.sendMessage({
+        type: "NCH_GET_LATEST_SNAPSHOT",
+        scope: context.scope
+      });
+      if (
+        !stored?.ok
+        || !Number.isInteger(stored.generation)
+      ) {
+        throw new Error("Latest snapshot store is unavailable");
+      }
+      if (
+        sequence !== state.latestSyncSequence
+        || !onLatestRoute()
+      ) {
+        return;
+      }
+
+      const snapshot = await latestCatalog.fetchSnapshot(document, {
+        generation: stored.generation,
+        // The inline bootstrap is current on a hard load but can become stale
+        // after leaving and re-entering /latest within Netflix's SPA. This
+        // tiny summary request guarantees that every route visit uses the
+        // current complete list length before requesting its IDs.
+        requireFreshSummary: true,
+        signal: latestAbortController.signal
+      });
+      if (
+        sequence !== state.latestSyncSequence
+        || !onLatestRoute()
+        || snapshot.scope !== context.scope
+      ) {
+        return;
+      }
+      state.latestBackoffUntil = 0;
+
+      const selected = state.filter.enabled
+        ? rules.getSelectedLanguages(state.filter)
+        : [];
+      const current = stored.snapshot;
+      const sameSet = latestCatalog.sameSnapshotSet(current, snapshot);
+      const currentVerified = verifiedLanguages(current);
+      const missingLanguages = selected.filter((code) => !currentVerified.has(code));
+      const signature = selectedLanguageSignature(selected, snapshot);
+      if (
+        sameSet
+        && missingLanguages.length === 0
+      ) {
+        state.latestProcessedHash = signature;
+        state.pendingLatestIds.clear();
+        await rebuildIndexes({ skipLatestSync: true });
+        return;
+      }
+      if (state.latestProcessedHash === signature && sameSet) {
+        return;
+      }
+
+      const difference = current
+        ? latestCatalog.diffSnapshots(current, snapshot)
+        : { added: snapshot.ids.slice(), removed: [], changed: true };
+      const transitionEvidence = sameSet
+        && latestCatalog.validTransitionEvidence(current?.epochEvidence, snapshot)
+        ? current.epochEvidence
+        : latestCatalog.transitionEvidence(current, snapshot);
+      if (!state.filter.enabled) {
+        const passiveSnapshot = {
+          ...snapshot,
+          epochEvidence: transitionEvidence,
+          verifiedLanguages: current && difference.added.length === 0
+            ? Array.from(currentVerified).sort()
+            : []
+        };
+        const passiveCommit = await chrome.runtime.sendMessage({
+          type: "NCH_COMMIT_LATEST_SNAPSHOT",
+          scope: context.scope,
+          generation: stored.generation,
+          expectedSnapshot: current,
+          snapshot: passiveSnapshot
+        });
+        if (sequence !== state.latestSyncSequence || !onLatestRoute()) {
+          return;
+        }
+        const passiveCommittedOrWonRace = passiveCommit?.ok === true
+          || (
+            passiveCommit?.conflict === true
+            && latestCatalog.sameSnapshotSet(passiveCommit.snapshot, snapshot)
+            && passiveCommit.snapshot?.epochEvidence === transitionEvidence
+          );
+        if (passiveCommittedOrWonRace) {
+          state.latestProcessedHash = signature;
+          state.pendingLatestIds.clear();
+        } else {
+          scheduleLatestRetry();
+        }
+        return;
+      }
+      if (
+        !sameSet
+        && current
+        && difference.added.length === 0
+        && missingLanguages.length === 0
+      ) {
+        // A title leaving Netflix's rolling New Releases window is not a
+        // deletion signal. Advance only the small Latest checkpoint and keep
+        // every language-cache entry untouched.
+        const reducedSnapshot = {
+          ...snapshot,
+          epochEvidence: transitionEvidence,
+          verifiedLanguages: Array.from(currentVerified).sort()
+        };
+        const reducedCommit = await chrome.runtime.sendMessage({
+          type: "NCH_COMMIT_LATEST_SNAPSHOT",
+          scope: context.scope,
+          generation: stored.generation,
+          expectedSnapshot: current,
+          snapshot: reducedSnapshot
+        });
+        if (sequence !== state.latestSyncSequence || !onLatestRoute()) {
+          return;
+        }
+        if (reducedCommit?.ok) {
+          state.latestProcessedHash = signature;
+          state.pendingLatestIds.clear();
+          await rebuildIndexes({ skipLatestSync: true });
+        } else {
+          scheduleLatestRetry();
+        }
+        return;
+      }
+
+      state.pendingLatestIds = new Set(sameSet ? [] : difference.added);
+      scheduleApply();
+      const sameBarrier = state.latestCatalogBarrier?.hash === snapshot.hash
+        && state.latestCatalogBarrier?.evidence === transitionEvidence;
+      if (!sameBarrier) {
+        state.latestCatalogRetryAttempt = 0;
+      }
+      const barrier = sameBarrier
+        ? state.latestCatalogBarrier
+        : {
+          hash: snapshot.hash,
+          capturedAt: snapshot.capturedAt,
+          evidence: transitionEvidence
+        };
+      state.latestCatalogBarrier = barrier;
+      const refreshCodes = current && difference.added.length === 0
+        ? missingLanguages
+        : selected;
+      const refreshResult = await rebuildIndexes({
+        minimumBuiltAt: barrier.capturedAt,
+        minimumBuiltAtCodes: refreshCodes,
+        latestEvidence: barrier.evidence,
+        skipLatestSync: true,
+        latestOwnsRetry: true
+      });
+      if (
+        sequence !== state.latestSyncSequence
+        || !onLatestRoute()
+      ) {
+        return;
+      }
+      if (refreshResult?.catalogsReady !== true) {
+        state.latestSyncRerunRequested = false;
+        state.latestSyncRerunDelay = null;
+        const retryAttempt = state.latestCatalogRetryAttempt;
+        const retryDelay = config.catalogRetryDelay(retryAttempt);
+        if (retryDelay == null) {
+          // Fail open for the remainder of this route visit. Re-entering
+          // /latest resets the bounded retry budget and tries again.
+          state.latestProcessedHash = signature;
+          state.pendingLatestIds.clear();
+          state.latestCatalogBarrier = null;
+          scheduleApply();
+          return;
+        }
+        state.latestCatalogRetryAttempt = retryAttempt + 1;
+        setLocalizedStatus("error", "filterStatusRetrying", {
+          seconds: Math.ceil(retryDelay / 1000),
+          attempt: retryAttempt + 1,
+          max: config.CATALOG_RETRY_DELAYS_MS.length
+        });
+        scheduleLatestRetry(retryDelay);
+        return;
+      }
+      state.latestCatalogRetryAttempt = 0;
+
+      const canCarryForwardVerified = sameSet
+        || (Boolean(current) && difference.added.length === 0);
+      const persistedCodes = Array.isArray(refreshResult.persistedCodes)
+        ? refreshResult.persistedCodes
+        : [];
+      const nextVerified = canCarryForwardVerified
+        ? Array.from(new Set([...currentVerified, ...persistedCodes])).sort()
+        : persistedCodes.slice().sort();
+      const committedSnapshot = {
+        ...snapshot,
+        epochEvidence: barrier.evidence,
+        verifiedLanguages: nextVerified
+      };
+      const commit = await chrome.runtime.sendMessage({
+        type: "NCH_COMMIT_LATEST_SNAPSHOT",
+        scope: context.scope,
+        generation: stored.generation,
+        expectedSnapshot: current,
+        catalogEvidence: barrier.evidence,
+        snapshot: committedSnapshot
+      });
+      if (sequence !== state.latestSyncSequence || !onLatestRoute()) {
+        return;
+      }
+      const committedOrWonRace = commit?.ok === true
+        || (
+          commit?.conflict === true
+          && latestCatalog.sameSnapshotSet(commit.snapshot, snapshot)
+          && commit.snapshot?.epochEvidence === barrier.evidence
+          && nextVerified.every((code) => verifiedLanguages(commit.snapshot).has(code))
+        );
+      if (!committedOrWonRace) {
+        if (refreshResult.catalogsPersisted === true) {
+          // The language data is already durable. Retrying the small snapshot
+          // commit reuses it through the fixed B barrier instead of fetching
+          // the language catalogs again.
+          scheduleLatestRetry();
+          return;
+        }
+        // A complete uncached result is authoritative for this page, but it
+        // is deliberately not checkpointed as verified. Stop retrying this
+        // visit; the next /latest entry can try persistence again.
+      }
+      state.latestCatalogBarrier = null;
+      state.latestProcessedHash = signature;
+      state.pendingLatestIds.clear();
+      scheduleApply();
+    } catch (error) {
+      if (sequence === state.latestSyncSequence && onLatestRoute()) {
+        if (latestCatalog.isPageNotReadyError?.(error)) {
+          state.latestBackoffUntil = 0;
+          scheduleLatestSync(700);
+        } else {
+          scheduleLatestRetry();
+        }
+      }
+    } finally {
+      window.clearTimeout(latestTimeoutTimer);
+      if (state.latestAbortController === latestAbortController) {
+        state.latestAbortController = null;
+      }
+      state.latestSyncInProgress = false;
+      const rerunRequested = state.latestSyncRerunRequested;
+      const rerunDelay = Number(state.latestSyncRerunDelay || 700);
+      state.latestSyncRerunRequested = false;
+      state.latestSyncRerunDelay = null;
+      if (
+        rerunRequested
+        && !state.latestProcessedHash
+        && onLatestRoute()
+      ) {
+        scheduleLatestSync(rerunDelay);
+      }
     }
   }
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (
       areaName === "local"
-      && (
-        changes[config.CATALOG_CACHE_KEY]
-        || changes[config.CATALOG_AUTO_REFRESH_TICK_KEY]
-      )
+      && changes[config.CATALOG_CACHE_KEY]
     ) {
       const cacheChange = changes[config.CATALOG_CACHE_KEY];
       const previousGeneration = cacheChange?.oldValue?.generation;
@@ -701,6 +1137,10 @@
         && (state.localCacheRefreshActive || generation === state.selfRefreshGeneration)
       ) {
         return;
+      }
+
+      if (cacheChange && previousGeneration !== generation) {
+        invalidateLatestSync();
       }
 
       state.abortController?.abort();
@@ -724,6 +1164,7 @@
     if (!changes.cardFilter) {
       return;
     }
+    const previousFilter = state.filter;
     const nextFilter = rules.normalizeFilter(changes.cardFilter.newValue);
     const nextSignature = JSON.stringify(nextFilter);
     if (nextSignature === state.suppressFilterSignature) {
@@ -732,6 +1173,12 @@
       return;
     }
     state.filter = nextFilter;
+    if (
+      previousFilter.enabled !== nextFilter.enabled
+      || filterLanguageSignature(previousFilter) !== filterLanguageSignature(nextFilter)
+    ) {
+      invalidateLatestSync();
+    }
     window.clearTimeout(state.storageRebuildTimer);
     state.storageRebuildTimer = window.setTimeout(() => {
       state.storageRebuildTimer = null;
@@ -751,7 +1198,14 @@
       chrome.storage.sync.get({ cardFilter: rules.DEFAULT_CARD_FILTER }).then(({ cardFilter }) => {
         window.clearTimeout(state.storageRebuildTimer);
         state.storageRebuildTimer = null;
-        state.filter = rules.normalizeFilter(cardFilter);
+        const nextFilter = rules.normalizeFilter(cardFilter);
+        if (
+          state.filter.enabled !== nextFilter.enabled
+          || filterLanguageSignature(state.filter) !== filterLanguageSignature(nextFilter)
+        ) {
+          invalidateLatestSync();
+        }
+        state.filter = nextFilter;
         const suppressedSignature = JSON.stringify(state.filter);
         state.suppressFilterSignature = suppressedSignature;
         window.setTimeout(() => {
@@ -774,6 +1228,7 @@
           window.clearTimeout(state.storageRebuildTimer);
           state.storageRebuildTimer = null;
           state.filter = rules.normalizeFilter(cardFilter);
+          invalidateLatestSync();
           const suppressedSignature = JSON.stringify(state.filter);
           state.suppressFilterSignature = suppressedSignature;
           window.setTimeout(() => {
@@ -815,21 +1270,34 @@
     if (location.href === state.previousHref) {
       return;
     }
+    const previousPathname = state.previousPathname;
+    const pathnameChanged = previousPathname !== location.pathname;
     state.previousHref = location.href;
+    state.previousPathname = location.pathname;
+    if (pathnameChanged) {
+      invalidateLatestSync();
+    }
     const nextRouteActive = isCardRoute();
     if (nextRouteActive !== state.routeActive) {
       state.routeActive = nextRouteActive;
+      rebuildIndexes();
+    } else if (pathnameChanged && nextRouteActive) {
+      // Re-entering /latest must establish its B barrier before any catalog
+      // load. Leaving it aborts an in-flight forced refresh and reloads the
+      // retained indexes shared by the destination page.
       rebuildIndexes();
     } else if (nextRouteActive && state.status.phase === "error") {
       rebuildIndexes();
     } else {
       scheduleApply();
     }
+    scheduleLatestSync();
   }, 700);
 
   metadataChannel.subscribe((map) => {
     state.videoIdMap = map;
     scheduleApply();
+    scheduleLatestSync();
   });
   observeDom();
   const initialUiLanguageRevision = uiLanguageController.revision;
@@ -838,7 +1306,14 @@
     uiLanguage: uiI18n.DEFAULT_UI_LANGUAGE
   }).then(({ cardFilter, uiLanguage }) => {
     uiLanguageController.hydrate(uiLanguage, initialUiLanguageRevision);
-    state.filter = rules.normalizeFilter(cardFilter);
+    const nextFilter = rules.normalizeFilter(cardFilter);
+    if (
+      state.filter.enabled !== nextFilter.enabled
+      || filterLanguageSignature(state.filter) !== filterLanguageSignature(nextFilter)
+    ) {
+      invalidateLatestSync();
+    }
+    state.filter = nextFilter;
     rebuildIndexes();
   });
 })();

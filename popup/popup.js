@@ -3,7 +3,6 @@
 
   const config = globalThis.NetflixSubtitleConfig;
   const uiI18n = globalThis.NetflixSubtitleUiI18n;
-  const cacheSchedule = globalThis.NetflixSubtitleCacheSchedule;
   const rules = globalThis.NetflixSubtitleFilterRules;
   const catalog = globalThis.NetflixSubtitleCatalog;
   const filterEnabledInput = document.getElementById("filter-enabled");
@@ -25,8 +24,6 @@
   const filterStateLabel = document.getElementById("filter-state-label");
   const status = document.getElementById("status");
   const uiLanguageSelect = document.getElementById("ui-language");
-  const weeklyCacheRefreshInput = document.getElementById("weekly-cache-refresh");
-  const weeklyRefreshHint = document.getElementById("weekly-refresh-hint");
   const preferredLanguageInputs = Array.from(document.querySelectorAll('input[name="preferred-language"]'));
   const languageList = Object.values(config.LANGUAGES);
   let uiLanguage = uiI18n.DEFAULT_UI_LANGUAGE;
@@ -37,7 +34,6 @@
   let filterDraftRevision = 0;
   let busyOperation = null;
   let nextBusyOperationId = 0;
-  let weeklyHintRevision = 0;
 
   function t(key, values) {
     return uiI18n.t(uiLanguage, key, values);
@@ -95,35 +91,6 @@
     return null;
   }
 
-  async function updateWeeklyRefreshHint() {
-    const revision = ++weeklyHintRevision;
-    const languageAtRequest = uiLanguage;
-    const translate = (key, values) => uiI18n.t(languageAtRequest, key, values);
-    if (!weeklyCacheRefreshInput.checked) {
-      weeklyRefreshHint.textContent = translate("weeklyRefreshHintOff");
-      return;
-    }
-    try {
-      const alarm = await chrome.alarms.get(cacheSchedule.ALARM_NAME);
-      if (revision !== weeklyHintRevision) {
-        return;
-      }
-      if (!alarm?.scheduledTime) {
-        weeklyRefreshHint.textContent = translate("weeklyRefreshHintPending");
-        return;
-      }
-      const date = new Intl.DateTimeFormat(uiI18n.UI_LANGUAGE_TAGS[languageAtRequest], {
-        dateStyle: "medium",
-        timeStyle: "short"
-      }).format(new Date(alarm.scheduledTime));
-      weeklyRefreshHint.textContent = translate("weeklyRefreshHintNext", { date });
-    } catch (_error) {
-      if (revision === weeklyHintRevision) {
-        weeklyRefreshHint.textContent = translate("weeklyRefreshHintPending");
-      }
-    }
-  }
-
   function setStatus(message, isError = false) {
     status.textContent = message;
     status.style.color = isError ? "#ff9ca2" : "#b9e8c9";
@@ -154,7 +121,6 @@
     const globallySelected = selectedCodes();
 
     uiLanguageSelect.disabled = locked;
-    weeklyCacheRefreshInput.disabled = locked;
     filterEnabledInput.disabled = locked;
     hideUnsupportedInput.disabled = locked;
     presetButtons.forEach((button) => {
@@ -499,7 +465,6 @@
       updateFilterStateLabel();
       renderGroups();
       await saveUiLanguage;
-      await updateWeeklyRefreshHint();
       setStatus(t("uiLanguageSaved"));
     } catch (_error) {
       uiLanguage = previousUiLanguage;
@@ -507,43 +472,7 @@
       applyStaticTranslations();
       updateFilterStateLabel();
       renderGroups();
-      await updateWeeklyRefreshHint();
       setStatus(t("saveFailed"), true);
-    } finally {
-      endBusyOperation(operation);
-    }
-  });
-
-  weeklyCacheRefreshInput.addEventListener("change", async () => {
-    if (!initialized) {
-      return;
-    }
-    const enabled = weeklyCacheRefreshInput.checked;
-    const previousEnabled = !enabled;
-    const operation = beginBusyOperation("weekly-refresh");
-    if (!operation) {
-      weeklyCacheRefreshInput.checked = previousEnabled;
-      return;
-    }
-    try {
-      const response = await chrome.runtime.sendMessage({
-        type: "NCH_SET_WEEKLY_REFRESH_ENABLED",
-        enabled
-      });
-      if (typeof response?.enabled === "boolean") {
-        weeklyCacheRefreshInput.checked = response.enabled;
-      }
-      if (!response?.ok || response.enabled !== enabled) {
-        throw new Error("Weekly schedule could not be committed");
-      }
-      setStatus(enabled ? t("scheduleEnabled") : t("scheduleDisabled"));
-      await updateWeeklyRefreshHint();
-    } catch (_error) {
-      if (weeklyCacheRefreshInput.checked === enabled) {
-        weeklyCacheRefreshInput.checked = previousEnabled;
-      }
-      setStatus(t("scheduleFailed"), true);
-      await updateWeeklyRefreshHint();
     } finally {
       endBusyOperation(operation);
     }
@@ -569,19 +498,6 @@
         setStatus(t("cacheClearedEnter"));
       } else {
         setStatus(t("refreshStarted"));
-      }
-      if (weeklyCacheRefreshInput.checked) {
-        try {
-          const scheduleResponse = await chrome.runtime.sendMessage({
-            type: "NCH_RESET_WEEKLY_REFRESH_SCHEDULE"
-          });
-          if (!scheduleResponse?.ok) {
-            throw new Error("Weekly schedule reset failed");
-          }
-          await updateWeeklyRefreshHint();
-        } catch (_error) {
-          setStatus(t("scheduleResetFailed"), true);
-        }
       }
     } catch (_error) {
       setStatus(t("refreshUnavailable"), true);
@@ -662,14 +578,12 @@
   const storageDefaults = {
     ...config.DEFAULT_SETTINGS,
     uiLanguage: config.DEFAULT_UI_LANGUAGE,
-    [config.WEEKLY_CACHE_REFRESH_KEY]: config.DEFAULT_WEEKLY_CACHE_REFRESH,
     cardFilter: rules.DEFAULT_CARD_FILTER
   };
 
   function finishInitialization(settings, loadFailed = false) {
     uiLanguage = uiI18n.normalizeUiLanguage(settings.uiLanguage);
     uiLanguageSelect.value = uiLanguage;
-    weeklyCacheRefreshInput.checked = settings[config.WEEKLY_CACHE_REFRESH_KEY] === true;
     applyStaticTranslations();
     preferredLanguage = settings.preferredLanguage;
     filterDraft = rules.normalizeFilter(settings.cardFilter);
@@ -686,7 +600,6 @@
     initialized = !loadFailed;
     renderGroups();
     syncControlStates();
-    updateWeeklyRefreshHint();
 
     if (loadFailed) {
       setStatus(t("settingsLoadFailed"), true);

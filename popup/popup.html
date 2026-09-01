@@ -85,15 +85,16 @@
         <button class="primary" id="apply-filter" type="button" disabled data-i18n="saveApply">保存并立即筛选</button>
         <button class="text-button refresh" id="refresh-filter" type="button" disabled data-i18n="manualRefresh">结果不对？清除全部缓存并重新读取</button>
 
-        <label class="toggle-row schedule-toggle">
+        <div class="latest-refresh-card">
+          <span class="latest-refresh-icon" aria-hidden="true">↻</span>
           <span>
-            <strong data-i18n="weeklyRefresh">每周自动更新字幕资料</strong>
-            <small id="weekly-refresh-hint" data-i18n="weeklyRefreshHintOff">关闭时仅在您手动点击更新后重新读取</small>
+            <strong data-i18n="latestRefresh">最新影片增量检查</strong>
+            <small data-i18n="latestRefreshHint">始终开启；打开 Netflix“最新热门影片”时会比较新增作品</small>
           </span>
-          <input id="weekly-cache-refresh" type="checkbox" role="switch" disabled>
-        </label>
+          <b class="latest-refresh-state" data-i18n="alwaysOn">自动</b>
+        </div>
 
-        <p class="hint" data-i18n="cacheHint">字幕编号与节目名称按地区、Netflix 资料、界面语言和字幕语言长期保存在本机。每周更新只处理当前规则使用且到期的语言；Netflix 未提供可靠的真正增量接口。</p>
+        <p class="hint" data-i18n="cacheHint">Title IDs and show names are stored locally. Selected languages are rechecked only when Netflix New Releases contains new IDs; a manual full update remains available.</p>
       </section>
 
       <details class="card player-card">
@@ -127,7 +128,6 @@
 
     <script src="../src/config.js"></script>
     <script src="../src/ui-i18n.js"></script>
-    <script src="../src/cache-schedule.js"></script>
     <script src="../src/filter-rules.js"></script>
     <script src="../src/netflix-catalog.js"></script>
     <script src="popup.js"></script>

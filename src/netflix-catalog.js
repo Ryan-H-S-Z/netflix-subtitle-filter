@@ -22,6 +22,39 @@
   const LEASE_WINNER_WAIT_MS = 60 * 1000;
   const CACHE_RECORD_PREFIX = `${config.CATALOG_CACHE_KEY}:record:`;
 
+  function latestEvidenceHash(ids) {
+    let hash = 2166136261;
+    const text = `latest-v1\u0000${ids.join("\u0000")}\u0000`;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, "0");
+  }
+
+  function validLatestEvidence(value) {
+    if (typeof value !== "string" || value.length === 0 || value.length > 9_000) {
+      return false;
+    }
+    const match = value.match(
+      /^(none|[0-9a-f]{8}):(0|[1-9]\d{0,15}):(\d{4,20}(?:,\d{4,20}){0,199})?>([0-9a-f]{8}):(\d{4,20}(?:,\d{4,20}){0,199})$/
+    );
+    if (!match) {
+      return false;
+    }
+    const previousIds = match[3] ? match[3].split(",") : [];
+    const previousIsValid = match[1] === "none"
+      ? match[2] === "0" && previousIds.length === 0
+      : match[2] !== "0"
+        && previousIds.length > 0
+        && previousIds.every((id, index) => index === 0 || previousIds[index - 1] < id)
+        && latestEvidenceHash(previousIds) === match[1];
+    const ids = match[5].split(",");
+    return previousIsValid
+      && ids.every((id, index) => index === 0 || ids[index - 1] < id)
+      && latestEvidenceHash(ids) === match[4];
+  }
+
   function decodeEmbeddedString(value) {
     return String(value || "")
       .replace(/\\x([0-9a-f]{2})/gi, (_match, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
@@ -425,6 +458,10 @@
         && Boolean(title)
       ))
       && new Set(record.titles).size === record.titles.length
+      && (
+        record.latestEvidence == null
+        || validLatestEvidence(record.latestEvidence)
+      )
       && Number.isFinite(builtAt)
       && builtAt <= now + 5 * 60 * 1000
     );
@@ -441,15 +478,6 @@
 
   function cacheRecordStorageKey(scope, code, generation = 0) {
     return `${CACHE_RECORD_PREFIX}g${generation}:${scope}:${code}`;
-  }
-
-  function cacheNeedsAutoRefresh(record, autoRefreshAt) {
-    const refreshAt = Number(autoRefreshAt);
-    const builtAt = Number(record?.builtAt);
-    return Number.isFinite(refreshAt)
-      && refreshAt > 0
-      && Number.isFinite(builtAt)
-      && builtAt < refreshAt;
   }
 
   function preserveStalePositiveTitles(result, staleRecord) {
@@ -633,10 +661,51 @@
     return timeoutError;
   }
 
-  async function waitForFreshRecord(item, generation, refreshAt, signal, maxWaitMs) {
+  function recordMeetsMinimumBuiltAt(record, minimumBuiltAt) {
+    const minimum = Number(minimumBuiltAt);
+    return !Number.isFinite(minimum) || Number(record?.builtAt) >= minimum;
+  }
+
+  function recordMeetsLatestEvidence(record, minimumBuiltAt, latestEvidence) {
+    return Boolean(
+      validLatestEvidence(latestEvidence)
+      && record?.latestEvidence === latestEvidence
+    ) || recordMeetsMinimumBuiltAt(record, minimumBuiltAt);
+  }
+
+  function forcedMinimumBuiltAt(force, record, requestedMinimumBuiltAt) {
+    if (force !== true) {
+      return null;
+    }
+    const requested = Number.isSafeInteger(requestedMinimumBuiltAt)
+      && requestedMinimumBuiltAt > 0
+      ? Number(requestedMinimumBuiltAt)
+      : 0;
+    const afterRecord = Number.isFinite(Number(record?.builtAt))
+      ? Number(record.builtAt) + 1
+      : 0;
+    return Math.max(requested, afterRecord) || null;
+  }
+
+  function requestedMinimumBuiltAt(value) {
+    return Number.isSafeInteger(value) && value > 0 ? Number(value) : null;
+  }
+
+  function requestedLatestEvidence(value) {
+    return validLatestEvidence(value) ? value : null;
+  }
+
+  async function waitForFreshRecord(
+    item,
+    generation,
+    minimumBuiltAt,
+    latestEvidence,
+    signal,
+    maxWaitMs
+  ) {
     const deadline = Date.now() + maxWaitMs;
     while (!signal?.aborted && Date.now() < deadline) {
-      const record = await readFreshRecord(item, generation, refreshAt);
+      const record = await readFreshRecord(item, generation, minimumBuiltAt, latestEvidence);
       if (record) {
         return record;
       }
@@ -663,19 +732,30 @@
     return error;
   }
 
-  async function readFreshRecord(item, generation, refreshAt) {
+  async function readFreshRecord(
+    item,
+    generation,
+    minimumBuiltAt = null,
+    latestEvidence = null
+  ) {
     const stored = await chrome.storage.local.get(item.storageKey);
     const record = stored[item.storageKey];
     if (
       validCacheRecord(record, item.code, item.scope, Date.now(), generation)
-      && !cacheNeedsAutoRefresh(record, refreshAt)
+      && recordMeetsLatestEvidence(record, minimumBuiltAt, latestEvidence)
     ) {
       return record;
     }
     return null;
   }
 
-  async function acquireFetchLeaseOrRecord(item, generation, refreshAt, signal) {
+  async function acquireFetchLeaseOrRecord(
+    item,
+    generation,
+    minimumBuiltAt,
+    latestEvidence,
+    signal
+  ) {
     for (;;) {
       if (signal?.aborted) {
         throw abortError();
@@ -692,7 +772,12 @@
       if (response.acquired === true && typeof response.token === "string") {
         // A previous owner may have committed and released between our last
         // storage read and this acquire. Re-check before doing duplicate work.
-        const record = await readFreshRecord(item, generation, refreshAt);
+        const record = await readFreshRecord(
+          item,
+          generation,
+          minimumBuiltAt,
+          latestEvidence
+        );
         if (record) {
           await releaseFetchLease(item, generation, response.token);
           return { record };
@@ -700,7 +785,7 @@
         return { token: response.token };
       }
 
-      const record = await readFreshRecord(item, generation, refreshAt);
+      const record = await readFreshRecord(item, generation, minimumBuiltAt, latestEvidence);
       if (record) {
         return { record };
       }
@@ -718,18 +803,6 @@
     const context = extractMemberContext(options.documentObject || document);
     const cacheMeta = await readCacheMeta();
     const generation = cacheMeta.generation;
-    const [refreshState, scheduleState] = await Promise.all([
-      chrome.storage.local.get(config.CATALOG_AUTO_REFRESH_TICK_KEY),
-      chrome.storage.sync.get({
-        [config.WEEKLY_CACHE_REFRESH_KEY]: config.DEFAULT_WEEKLY_CACHE_REFRESH
-      })
-    ]);
-    const autoRefreshAt = Number(refreshState[config.CATALOG_AUTO_REFRESH_TICK_KEY]);
-    const validAutoRefreshAt = scheduleState[config.WEEKLY_CACHE_REFRESH_KEY] === true
-      && Number.isFinite(autoRefreshAt)
-      && autoRefreshAt > 0
-      ? autoRefreshAt
-      : 0;
     const storageKeys = Object.fromEntries(selectedCodes.map((code) => [
       code,
       cacheRecordStorageKey(context.scope, code, generation)
@@ -747,6 +820,9 @@
     }
     const indexes = {};
     const pending = [];
+    const minimumBuiltAtCodes = Array.isArray(options.minimumBuiltAtCodes)
+      ? new Set(options.minimumBuiltAtCodes)
+      : null;
 
     for (const code of selectedCodes) {
       const storageKey = storageKeys[code];
@@ -758,9 +834,25 @@
         Date.now(),
         generation
       );
-      const refreshDue = recordIsValid
-        && cacheNeedsAutoRefresh(record, validAutoRefreshAt);
-      if (!options.force && recordIsValid && !refreshDue) {
+      const requiresLatestEvidence = minimumBuiltAtCodes === null
+        || minimumBuiltAtCodes.has(code);
+      const minimumBuiltAt = options.force
+        ? forcedMinimumBuiltAt(
+          true,
+          recordIsValid ? record : null,
+          options.minimumBuiltAt
+        )
+        : (requiresLatestEvidence
+          ? requestedMinimumBuiltAt(options.minimumBuiltAt)
+          : null);
+      const latestEvidence = requiresLatestEvidence
+        ? requestedLatestEvidence(options.latestEvidence)
+        : null;
+      if (
+        !options.force
+        && recordIsValid
+        && recordMeetsLatestEvidence(record, minimumBuiltAt, latestEvidence)
+      ) {
         indexes[code] = cacheRecordToIndex(record, true);
         options.onLanguageReady?.({
           code,
@@ -773,7 +865,12 @@
           code,
           storageKey,
           scope: context.scope,
-          staleRecord: recordIsValid ? record : null
+          staleRecord: recordIsValid ? record : null,
+          // A refresh cannot reuse unrelated old evidence. Another tab may
+          // satisfy it with a newer record or one tagged for the exact same
+          // complete Latest set.
+          minimumBuiltAt,
+          latestEvidence
         });
       }
     }
@@ -794,7 +891,8 @@
           const coordination = await acquireFetchLeaseOrRecord(
             item,
             generation,
-            validAutoRefreshAt,
+            item.minimumBuiltAt,
+            item.latestEvidence,
             bounded.signal
           );
           if (coordination.record) {
@@ -812,7 +910,10 @@
 
           leaseToken = coordination.token;
           leaseHeartbeat = startLeaseHeartbeat(item, generation, leaseToken);
-          const refreshStartedAt = Date.now();
+          const refreshStartedAt = Math.max(
+            Date.now(),
+            Number(item.minimumBuiltAt || 0)
+          );
           const fetchedResult = await fetchLanguageIndex(item.code, context, {
             ...options,
             signal: bounded.signal
@@ -839,7 +940,8 @@
               complete: true,
               titlesComplete: result.titlesComplete === true,
               titleSourceCount: Number(result.titleSourceCount || 0),
-              builtAt: refreshStartedAt
+              builtAt: refreshStartedAt,
+              ...(item.latestEvidence ? { latestEvidence: item.latestEvidence } : {})
             };
             try {
               const writeResult = await writeCacheRecord(
@@ -856,7 +958,8 @@
                 const winner = await waitForFreshRecord(
                   item,
                   generation,
-                  validAutoRefreshAt,
+                  item.minimumBuiltAt,
+                  item.latestEvidence,
                   bounded.signal,
                   LEASE_WINNER_WAIT_MS
                 );
@@ -993,7 +1096,12 @@
     validCacheRecord,
     pruneCache,
     cacheRecordStorageKey,
-    cacheNeedsAutoRefresh,
+    validLatestEvidence,
+    recordMeetsMinimumBuiltAt,
+    recordMeetsLatestEvidence,
+    forcedMinimumBuiltAt,
+    requestedMinimumBuiltAt,
+    requestedLatestEvidence,
     normalizeLanguageLoadError,
     uncachedFetchedIndex,
     languageIndexError,

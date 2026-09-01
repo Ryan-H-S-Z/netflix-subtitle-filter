@@ -1,12 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Netflix Subtitle Filter",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "Filter Netflix browsing cards by subtitle-language rules and import local subtitles on playback pages.",
   "minimum_chrome_version": "114",
   "permissions": [
-    "storage",
-    "alarms"
+    "storage"
   ],
   "host_permissions": [
     "https://www.netflix.com/*"
@@ -61,6 +60,7 @@
         "src/ui-i18n.js",
         "src/filter-rules.js",
         "src/netflix-catalog.js",
+        "src/latest-catalog.js",
         "src/card-layout.js",
         "src/card-filter.js"
       ],

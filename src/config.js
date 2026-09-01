@@ -68,11 +68,8 @@
   });
 
   const CATALOG_CACHE_KEY = "nchCatalogCacheV1";
+  const LATEST_SNAPSHOTS_KEY = "nchLatestSnapshotsV1";
   const DEFAULT_UI_LANGUAGE = "en";
-  const DEFAULT_WEEKLY_CACHE_REFRESH = false;
-  const WEEKLY_CACHE_REFRESH_KEY = "weeklyCacheRefresh";
-  const CATALOG_LAST_AUTO_REFRESH_KEY = "nchCatalogLastAutoRefreshAt";
-  const CATALOG_AUTO_REFRESH_TICK_KEY = "nchCatalogAutoRefreshTick";
   const CATALOG_RETRY_DELAYS_MS = Object.freeze([1000, 3000, 8000]);
 
   function getLanguage(code) {
@@ -142,11 +139,8 @@
     LANGUAGES,
     DEFAULT_SETTINGS,
     DEFAULT_UI_LANGUAGE,
-    DEFAULT_WEEKLY_CACHE_REFRESH,
     CATALOG_CACHE_KEY,
-    WEEKLY_CACHE_REFRESH_KEY,
-    CATALOG_LAST_AUTO_REFRESH_KEY,
-    CATALOG_AUTO_REFRESH_TICK_KEY,
+    LATEST_SNAPSHOTS_KEY,
     CATALOG_RETRY_DELAYS_MS,
     getLanguage,
     getFilterUrl,

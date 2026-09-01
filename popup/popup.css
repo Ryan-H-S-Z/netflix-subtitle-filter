@@ -333,10 +333,42 @@ button.add-group {
   padding: 11px 0;
 }
 
-.schedule-toggle {
+.latest-refresh-card {
+  align-items: center;
   border-top: 1px solid rgba(255, 255, 255, .1);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto 1fr auto;
   margin-top: 9px;
   padding-top: 11px;
+}
+
+.latest-refresh-card small {
+  color: #aaa;
+  display: block;
+  margin-top: 3px;
+}
+
+.latest-refresh-icon {
+  align-items: center;
+  background: rgba(70, 199, 120, .12);
+  border: 1px solid rgba(70, 199, 120, .28);
+  border-radius: 10px;
+  color: #79dfa0;
+  display: inline-flex;
+  font-size: 20px;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+
+.latest-refresh-state {
+  background: rgba(70, 199, 120, .13);
+  border-radius: 999px;
+  color: #79dfa0;
+  font-size: 11px;
+  padding: 5px 8px;
+  white-space: nowrap;
 }
 
 button.primary { background: #e50914; width: 100%; }

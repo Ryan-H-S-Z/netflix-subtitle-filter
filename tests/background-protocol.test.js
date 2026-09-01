@@ -8,9 +8,9 @@ const vm = require("node:vm");
 const nodeCrypto = require("node:crypto");
 
 const projectRoot = path.resolve(__dirname, "..");
-const schedule = require("../src/cache-schedule.js");
 const config = require("../src/config.js");
 const catalog = require("../src/netflix-catalog.js");
+const latestCatalog = require("../src/latest-catalog.js");
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
@@ -261,6 +261,65 @@ function validCacheRecord(overrides = {}) {
   };
 }
 
+function latestSnapshot(overrides = {}) {
+  const {
+    ids = ["81414001", "81739044"],
+    ...options
+  } = overrides;
+  return latestCatalog.createSnapshot(ids, {
+    scope: "TH-profile-locale",
+    generation: 0,
+    listId: "latest-list",
+    capturedAt: 1_800_000_000_000,
+    ...options
+  });
+}
+
+function checkpointSnapshot(previous, snapshot) {
+  const epochEvidence = latestCatalog.sameSnapshotSet(previous, snapshot)
+    && latestCatalog.validTransitionEvidence(previous?.epochEvidence, snapshot)
+    ? previous.epochEvidence
+    : latestCatalog.transitionEvidence(previous, snapshot);
+  return { ...snapshot, epochEvidence };
+}
+
+function persistLatestLanguages(harness, snapshot) {
+  if (!Object.hasOwn(harness.local, config.CATALOG_CACHE_KEY)) {
+    harness.local[config.CATALOG_CACHE_KEY] = {
+      version: 2,
+      generation: snapshot.generation
+    };
+  }
+  for (const code of snapshot.verifiedLanguages || []) {
+    const storageKey = catalog.cacheRecordStorageKey(
+      snapshot.scope,
+      code,
+      snapshot.generation
+    );
+    harness.local[storageKey] = validCacheRecord({
+      generation: snapshot.generation,
+      code,
+      scope: snapshot.scope,
+      genreId: config.LANGUAGES[code].genreId,
+      latestEvidence: snapshot.epochEvidence,
+      builtAt: Date.now()
+    });
+  }
+}
+
+function latestCommitMessage(previous, snapshot) {
+  return {
+    type: "NCH_COMMIT_LATEST_SNAPSHOT",
+    scope: snapshot.scope,
+    generation: snapshot.generation,
+    expectedSnapshot: previous,
+    catalogEvidence: snapshot.verifiedLanguages?.length
+      ? snapshot.epochEvidence
+      : undefined,
+    snapshot
+  };
+}
+
 function writeMessage(record, leaseToken) {
   const request = leaseMessage("NCH_ACQUIRE_CATALOG_FETCH_LEASE");
   return {
@@ -433,6 +492,12 @@ test("clearing the catalog removes every record generation and all leases", asyn
       [leaseKey]: {
         [recordKeys[1]]: { token: "00000000-current-owner", expiresAt: Date.now() + 60_000 }
       },
+      [config.LATEST_SNAPSHOTS_KEY]: {
+        version: 1,
+        entries: {
+          [scope]: latestSnapshot({ scope, generation: 2 })
+        }
+      },
       unrelatedSetting: "keep"
     }
   });
@@ -446,6 +511,7 @@ test("clearing the catalog removes every record generation and all leases", asyn
     assert.equal(Object.hasOwn(harness.local, key), false, `must remove ${key}`);
   }
   assert.equal(Object.hasOwn(harness.local, leaseKey), false);
+  assert.equal(Object.hasOwn(harness.local, config.LATEST_SNAPSHOTS_KEY), false);
   assert.equal(harness.local.unrelatedSetting, "keep");
   assert.deepEqual(harness.local[config.CATALOG_CACHE_KEY], { version: 2, generation: 3 });
 });
@@ -513,7 +579,6 @@ test("failed invalid-meta cleanup does not activate generation zero", async () =
       [recordKey]: { generation: 0 }
     }
   });
-  await harness.sendMessage({ type: "NCH_RESET_WEEKLY_REFRESH_SCHEDULE" });
   harness.failNext("storage.local.remove");
 
   assert.deepEqual(
@@ -527,128 +592,364 @@ test("failed invalid-meta cleanup does not activate generation zero", async () =
   assert.equal(Object.hasOwn(harness.local, recordKey), true);
 });
 
-test("weekly refresh toggle commits settings, timestamp, tick and alarm together", async () => {
+test("latest snapshot protocol reads an empty checkpoint and commits the first snapshot", async () => {
+  const harness = createBackgroundHarness();
+  const scope = "TH-profile-locale";
+  const snapshot = checkpointSnapshot(null, latestSnapshot({
+    scope,
+    verifiedLanguages: ["zh-hans"]
+  }));
+  persistLatestLanguages(harness, snapshot);
+
+  assert.deepEqual(
+    await harness.sendMessage({ type: "NCH_GET_LATEST_SNAPSHOT", scope }),
+    { ok: true, generation: 0, snapshot: null }
+  );
+  assert.deepEqual(
+    await harness.sendMessage(latestCommitMessage(null, snapshot)),
+    { ok: true, written: true, generation: 0, snapshot }
+  );
+  assert.deepEqual(
+    await harness.sendMessage({ type: "NCH_GET_LATEST_SNAPSHOT", scope }),
+    { ok: true, generation: 0, snapshot }
+  );
+  assert.deepEqual(harness.local[config.LATEST_SNAPSHOTS_KEY], {
+    version: 1,
+    entries: { [scope]: snapshot }
+  });
+});
+
+test("latest snapshot protocol checkpoints verified languages even when the IDs are unchanged", async () => {
+  const harness = createBackgroundHarness();
+  const scope = "TH-profile-locale";
+  const initial = checkpointSnapshot(null, latestSnapshot({
+    scope,
+    capturedAt: 1_800_000_000_000,
+    verifiedLanguages: ["en"]
+  }));
+  const checkpoint = checkpointSnapshot(initial, latestSnapshot({
+    scope,
+    capturedAt: 1_800_000_000_100,
+    verifiedLanguages: ["zh-hans", "en"]
+  }));
+  assert.equal(checkpoint.hash, initial.hash);
+
+  persistLatestLanguages(harness, initial);
+  await harness.sendMessage(latestCommitMessage(null, initial));
+  persistLatestLanguages(harness, checkpoint);
+  assert.deepEqual(
+    await harness.sendMessage(latestCommitMessage(initial, checkpoint)),
+    { ok: true, written: true, generation: 0, snapshot: checkpoint }
+  );
+  assert.deepEqual(
+    harness.local[config.LATEST_SNAPSHOTS_KEY].entries[scope].verifiedLanguages,
+    ["en", "zh-hans"]
+  );
+
+  const staleParallelCheckpoint = checkpointSnapshot(initial, latestSnapshot({
+    scope,
+    capturedAt: 1_800_000_000_200,
+    verifiedLanguages: ["th"]
+  }));
+  persistLatestLanguages(harness, staleParallelCheckpoint);
+  const merged = await harness.sendMessage(
+    latestCommitMessage(initial, staleParallelCheckpoint)
+  );
+  assert.equal(merged.ok, true);
+  assert.deepEqual(merged.snapshot.verifiedLanguages, ["en", "th", "zh-hans"]);
+  assert.deepEqual(
+    harness.local[config.LATEST_SNAPSHOTS_KEY].entries[scope].verifiedLanguages,
+    ["en", "th", "zh-hans"],
+    "same-hash commits must not erase languages verified by another tab"
+  );
+});
+
+test("latest snapshot commit uses the complete expected epoch as a compare-and-swap guard", async () => {
+  const harness = createBackgroundHarness();
+  const scope = "TH-profile-locale";
+  const current = checkpointSnapshot(null, latestSnapshot({ scope }));
+  const replacement = checkpointSnapshot(current, latestSnapshot({
+    scope,
+    ids: ["81414001", "81818181"],
+    capturedAt: current.capturedAt + 1
+  }));
+  const staleExpected = {
+    ...current,
+    capturedAt: current.capturedAt + 50
+  };
+
+  await harness.sendMessage(latestCommitMessage(null, current));
+  assert.deepEqual(
+    await harness.sendMessage(latestCommitMessage(staleExpected, replacement)),
+    { ok: false, conflict: true, generation: 0, snapshot: current }
+  );
+  assert.deepEqual(
+    harness.local[config.LATEST_SNAPSHOTS_KEY].entries[scope],
+    current
+  );
+});
+
+test("parallel A-to-B commits merge verified languages for the same exact B set", async () => {
+  const harness = createBackgroundHarness();
+  const scope = "TH-profile-locale";
+  const snapshotA = checkpointSnapshot(null, latestSnapshot({ scope }));
+  const snapshotBEnglish = checkpointSnapshot(snapshotA, latestSnapshot({
+    scope,
+    ids: ["81414001", "81818181"],
+    capturedAt: snapshotA.capturedAt + 1,
+    verifiedLanguages: ["en"]
+  }));
+  const snapshotBThai = checkpointSnapshot(snapshotA, latestSnapshot({
+    scope,
+    ids: snapshotBEnglish.ids,
+    capturedAt: snapshotA.capturedAt + 2,
+    verifiedLanguages: ["th"]
+  }));
+
+  await harness.sendMessage(latestCommitMessage(null, snapshotA));
+  persistLatestLanguages(harness, snapshotBEnglish);
+  await harness.sendMessage(latestCommitMessage(snapshotA, snapshotBEnglish));
+  persistLatestLanguages(harness, snapshotBThai);
+  const merged = await harness.sendMessage(latestCommitMessage(snapshotA, snapshotBThai));
+
+  assert.equal(merged.ok, true);
+  assert.deepEqual(merged.snapshot.verifiedLanguages, ["en", "th"]);
+  assert.deepEqual(
+    harness.local[config.LATEST_SNAPSHOTS_KEY].entries[scope].verifiedLanguages,
+    ["en", "th"]
+  );
+});
+
+test("a later same-set commit cannot move the snapshot capture time backwards", async () => {
+  const harness = createBackgroundHarness();
+  const scope = "TH-profile-locale";
+  const newer = checkpointSnapshot(null, latestSnapshot({
+    scope,
+    capturedAt: 1_800_000_000_200,
+    verifiedLanguages: ["en"]
+  }));
+  const olderFinishingLater = checkpointSnapshot(null, latestSnapshot({
+    scope,
+    ids: newer.ids,
+    capturedAt: 1_800_000_000_100,
+    verifiedLanguages: ["th"]
+  }));
+
+  persistLatestLanguages(harness, newer);
+  await harness.sendMessage(latestCommitMessage(null, newer));
+  persistLatestLanguages(harness, olderFinishingLater);
+  const merged = await harness.sendMessage(
+    latestCommitMessage(null, olderFinishingLater)
+  );
+
+  assert.equal(merged.snapshot.capturedAt, newer.capturedAt);
+  assert.deepEqual(merged.snapshot.verifiedLanguages, ["en", "th"]);
+  assert.equal(
+    harness.local[config.LATEST_SNAPSHOTS_KEY].entries[scope].capturedAt,
+    newer.capturedAt
+  );
+});
+
+test("a newer same-set checkpoint updates capture metadata even without new languages", async () => {
+  const harness = createBackgroundHarness();
+  const scope = "TH-profile-locale";
+  const earlier = checkpointSnapshot(null, latestSnapshot({
+    scope,
+    capturedAt: 1_800_000_000_100,
+    verifiedLanguages: ["en"]
+  }));
+  const newer = checkpointSnapshot(earlier, latestSnapshot({
+    scope,
+    ids: earlier.ids,
+    listId: "latest-list-new",
+    capturedAt: 1_800_000_000_200,
+    verifiedLanguages: ["en"]
+  }));
+
+  persistLatestLanguages(harness, earlier);
+  await harness.sendMessage(latestCommitMessage(null, earlier));
+  const committed = await harness.sendMessage(latestCommitMessage(earlier, newer));
+
+  assert.equal(committed.written, true);
+  assert.equal(committed.snapshot.capturedAt, newer.capturedAt);
+  assert.equal(committed.snapshot.listId, newer.listId);
+});
+
+test("latest snapshots are isolated by member scope and cache generation", async () => {
+  const scope = "TH-profile-locale";
+  const otherScope = "TH-other-profile-locale";
   const harness = createBackgroundHarness({
     local: {
-      [schedule.LAST_REFRESH_KEY]: 1000,
-      [schedule.REFRESH_TICK_KEY]: 900
+      [config.CATALOG_CACHE_KEY]: { version: 2, generation: 2 }
+    }
+  });
+  const current = checkpointSnapshot(null, latestSnapshot({ scope, generation: 2 }));
+
+  assert.deepEqual(
+    await harness.sendMessage(latestCommitMessage(null, current)),
+    { ok: true, written: true, generation: 2, snapshot: current }
+  );
+  assert.deepEqual(
+    await harness.sendMessage({ type: "NCH_GET_LATEST_SNAPSHOT", scope: otherScope }),
+    { ok: true, generation: 2, snapshot: null }
+  );
+
+  const stale = checkpointSnapshot(null, latestSnapshot({
+    scope,
+    generation: 1,
+    capturedAt: current.capturedAt + 1
+  }));
+  assert.deepEqual(
+    await harness.sendMessage(latestCommitMessage(null, stale)),
+    { ok: false, conflict: true, generation: 2 }
+  );
+  assert.deepEqual(
+    await harness.sendMessage({ type: "NCH_GET_LATEST_SNAPSHOT", scope }),
+    { ok: true, generation: 2, snapshot: current }
+  );
+});
+
+test("a pre-epoch latest snapshot is ignored instead of bypassing verification", async () => {
+  const scope = "TH-profile-locale";
+  const legacySnapshot = latestSnapshot({ scope });
+  const harness = createBackgroundHarness({
+    local: {
+      [config.CATALOG_CACHE_KEY]: { version: 2, generation: 0 },
+      [config.LATEST_SNAPSHOTS_KEY]: {
+        version: 1,
+        entries: { [scope]: legacySnapshot }
+      }
+    }
+  });
+
+  assert.deepEqual(
+    await harness.sendMessage({ type: "NCH_GET_LATEST_SNAPSHOT", scope }),
+    { ok: true, generation: 0, snapshot: null }
+  );
+});
+
+test("latest snapshot refuses to checkpoint a language whose catalog was evicted", async () => {
+  const harness = createBackgroundHarness();
+  const snapshot = checkpointSnapshot(null, latestSnapshot({ verifiedLanguages: ["en"] }));
+
+  assert.deepEqual(
+    await harness.sendMessage(latestCommitMessage(null, snapshot)),
+    {
+      ok: false,
+      persistenceConflict: true,
+      generation: 0,
+      snapshot: null
+    }
+  );
+  assert.equal(Object.hasOwn(harness.local, config.LATEST_SNAPSHOTS_KEY), false);
+});
+
+test("latest snapshot accepts a complete catalog built after B without transition metadata", async () => {
+  const now = Date.now();
+  const harness = createBackgroundHarness({
+    local: {
+      [config.CATALOG_CACHE_KEY]: { version: 2, generation: 0 }
+    }
+  });
+  const snapshot = checkpointSnapshot(null, latestSnapshot({
+    capturedAt: now - 1_000,
+    verifiedLanguages: ["en"]
+  }));
+  const storageKey = catalog.cacheRecordStorageKey(snapshot.scope, "en", 0);
+  harness.local[storageKey] = validCacheRecord({
+    code: "en",
+    scope: snapshot.scope,
+    genreId: config.LANGUAGES.en.genreId,
+    builtAt: now
+  });
+
+  assert.deepEqual(
+    await harness.sendMessage(latestCommitMessage(null, snapshot)),
+    { ok: true, written: true, generation: 0, snapshot }
+  );
+});
+
+test("latest snapshot CAS rejects A-to-B work after an A-to-C-to-A epoch change", async () => {
+  const harness = createBackgroundHarness();
+  const snapshotA1 = checkpointSnapshot(null, latestSnapshot({
+    capturedAt: 1_800_000_000_000
+  }));
+  const staleB = checkpointSnapshot(snapshotA1, latestSnapshot({
+    ids: ["81414001", "81818181"],
+    capturedAt: 1_800_000_000_010
+  }));
+  const snapshotC = checkpointSnapshot(snapshotA1, latestSnapshot({
+    ids: ["81414001", "81999999"],
+    capturedAt: 1_800_000_000_020
+  }));
+  const snapshotA2 = checkpointSnapshot(snapshotC, latestSnapshot({
+    ids: snapshotA1.ids,
+    capturedAt: 1_800_000_000_030
+  }));
+
+  await harness.sendMessage(latestCommitMessage(null, snapshotA1));
+  await harness.sendMessage(latestCommitMessage(snapshotA1, snapshotC));
+  await harness.sendMessage(latestCommitMessage(snapshotC, snapshotA2));
+  assert.deepEqual(
+    await harness.sendMessage(latestCommitMessage(snapshotA1, staleB)),
+    { ok: false, conflict: true, generation: 0, snapshot: snapshotA2 }
+  );
+});
+
+test("same target IDs do not merge verified languages from an older transition epoch", async () => {
+  const harness = createBackgroundHarness();
+  const snapshotA = checkpointSnapshot(null, latestSnapshot({
+    capturedAt: 1_800_000_000_000
+  }));
+  const snapshotC = checkpointSnapshot(snapshotA, latestSnapshot({
+    ids: ["81414001", "81999999"],
+    capturedAt: 1_800_000_000_010
+  }));
+  const currentB = checkpointSnapshot(snapshotC, latestSnapshot({
+    ids: ["81414001", "81818181"],
+    capturedAt: 1_800_000_000_020,
+    verifiedLanguages: ["th"]
+  }));
+  const staleB = checkpointSnapshot(snapshotA, latestSnapshot({
+    ids: currentB.ids,
+    capturedAt: 1_800_000_000_030,
+    verifiedLanguages: ["en"]
+  }));
+
+  await harness.sendMessage(latestCommitMessage(null, snapshotA));
+  await harness.sendMessage(latestCommitMessage(snapshotA, snapshotC));
+  persistLatestLanguages(harness, currentB);
+  await harness.sendMessage(latestCommitMessage(snapshotC, currentB));
+  persistLatestLanguages(harness, staleB);
+  assert.deepEqual(
+    await harness.sendMessage(latestCommitMessage(snapshotA, staleB)),
+    { ok: false, conflict: true, generation: 0, snapshot: currentB }
+  );
+  assert.deepEqual(
+    harness.local[config.LATEST_SNAPSHOTS_KEY].entries[snapshotA.scope].verifiedLanguages,
+    ["th"]
+  );
+});
+
+test("extension update removes legacy weekly-refresh settings", async () => {
+  const harness = createBackgroundHarness({
+    local: {
+      nchCatalogLastAutoRefreshAt: 1_700_000_000_000,
+      nchCatalogAutoRefreshTick: 1_700_000_000_100,
+      unrelatedLocal: "keep"
     },
-    sync: { [schedule.AUTO_REFRESH_KEY]: false }
+    sync: {
+      weeklyCacheRefresh: true,
+      unrelatedSync: "keep"
+    }
   });
+
+  harness.chrome.runtime.onInstalled.dispatch({ reason: "update" });
   await harness.sendMessage({ type: "NCH_GET_CATALOG_CACHE_META" });
 
-  const beforeEnable = Date.now();
-  const enabled = await harness.sendMessage({
-    type: "NCH_SET_WEEKLY_REFRESH_ENABLED",
-    enabled: true
-  });
-  assert.deepEqual(enabled, { ok: true, enabled: true });
-  assert.equal(harness.sync[schedule.AUTO_REFRESH_KEY], true);
-  assert.ok(harness.local[schedule.LAST_REFRESH_KEY] >= beforeEnable);
-  assert.equal(Object.hasOwn(harness.local, schedule.REFRESH_TICK_KEY), false);
-  const activeAlarm = harness.alarms.get(schedule.ALARM_NAME);
-  assert.equal(activeAlarm.periodInMinutes, schedule.WEEK_MINUTES);
-  assert.ok(activeAlarm.scheduledTime >= harness.local[schedule.LAST_REFRESH_KEY] + schedule.WEEK_MS);
-
-  const disabled = await harness.sendMessage({
-    type: "NCH_SET_WEEKLY_REFRESH_ENABLED",
-    enabled: false
-  });
-  assert.deepEqual(disabled, { ok: true, enabled: false });
-  assert.equal(harness.sync[schedule.AUTO_REFRESH_KEY], false);
-  assert.equal(harness.alarms.has(schedule.ALARM_NAME), false);
-  assert.equal(Object.hasOwn(harness.local, schedule.REFRESH_TICK_KEY), false);
-});
-
-test("weekly refresh toggle restores the prior disabled state after a partial failure", async () => {
-  const oldAlarm = {
-    name: schedule.ALARM_NAME,
-    scheduledTime: 2_500_000_000_000,
-    when: 2_500_000_000_000,
-    periodInMinutes: schedule.WEEK_MINUTES
-  };
-  const harness = createBackgroundHarness({
-    sync: { [schedule.AUTO_REFRESH_KEY]: false },
-  });
-  await harness.sendMessage({ type: "NCH_GET_CATALOG_CACHE_META" });
-  // The service worker's initial reconciliation runs before messages and
-  // legitimately removes a disabled schedule. Install the transaction's
-  // pre-state only after that startup work has drained.
-  harness.local[schedule.LAST_REFRESH_KEY] = 123456;
-  harness.local[schedule.REFRESH_TICK_KEY] = 123000;
-  harness.alarms.set(schedule.ALARM_NAME, clone(oldAlarm));
-  harness.failNext("alarms.create");
-
-  const response = await harness.sendMessage({
-    type: "NCH_SET_WEEKLY_REFRESH_ENABLED",
-    enabled: true
-  });
-  assert.equal(response.ok, false);
-  assert.equal(harness.sync[schedule.AUTO_REFRESH_KEY], false);
-  assert.equal(harness.local[schedule.LAST_REFRESH_KEY], 123456);
-  assert.equal(Object.hasOwn(harness.local, schedule.REFRESH_TICK_KEY), false);
-  assert.equal(harness.alarms.has(schedule.ALARM_NAME), false);
-});
-
-test("rollback continues after a second failure and reconciles from the actual sync value", async () => {
-  const harness = createBackgroundHarness({
-    sync: { [schedule.AUTO_REFRESH_KEY]: false }
-  });
-  await harness.sendMessage({ type: "NCH_GET_CATALOG_CACHE_META" });
-  const lastRefreshAt = Date.now();
-  const refreshTick = lastRefreshAt - 1;
-  const scheduledTime = lastRefreshAt + schedule.WEEK_MS;
-  harness.local[schedule.LAST_REFRESH_KEY] = lastRefreshAt;
-  harness.local[schedule.REFRESH_TICK_KEY] = refreshTick;
-  harness.alarms.set(schedule.ALARM_NAME, {
-    name: schedule.ALARM_NAME,
-    scheduledTime,
-    when: scheduledTime,
-    periodInMinutes: schedule.WEEK_MINUTES
-  });
-
-  // The requested sync write reaches storage and then reports failure. Its
-  // rollback also fails, before writing the prior value. The worker must still
-  // restore local state/alarm and reconcile against the actual `true` value.
-  harness.failSequence("storage.sync.set", ["after", "before"]);
-  const response = await harness.sendMessage({
-    type: "NCH_SET_WEEKLY_REFRESH_ENABLED",
-    enabled: true
-  });
-
-  assert.deepEqual(response, { ok: false, enabled: true });
-  assert.equal(harness.sync[schedule.AUTO_REFRESH_KEY], true);
-  assert.equal(harness.local[schedule.LAST_REFRESH_KEY], lastRefreshAt);
-  assert.equal(harness.local[schedule.REFRESH_TICK_KEY], refreshTick);
-  const reconciledAlarm = harness.alarms.get(schedule.ALARM_NAME);
-  assert.equal(reconciledAlarm.periodInMinutes, schedule.WEEK_MINUTES);
-  assert.equal(reconciledAlarm.scheduledTime, scheduledTime);
-});
-
-test("disabling weekly refresh also rolls back if the final setting write fails", async () => {
-  const harness = createBackgroundHarness({
-    sync: { [schedule.AUTO_REFRESH_KEY]: true }
-  });
-  await harness.sendMessage({ type: "NCH_GET_CATALOG_CACHE_META" });
-  const lastRefreshAt = Date.now();
-  const oldAlarm = {
-    name: schedule.ALARM_NAME,
-    scheduledTime: lastRefreshAt + schedule.WEEK_MS,
-    when: lastRefreshAt + schedule.WEEK_MS,
-    periodInMinutes: schedule.WEEK_MINUTES
-  };
-  harness.local[schedule.LAST_REFRESH_KEY] = lastRefreshAt;
-  harness.local[schedule.REFRESH_TICK_KEY] = lastRefreshAt - 1;
-  harness.alarms.set(schedule.ALARM_NAME, clone(oldAlarm));
-  harness.failNext("storage.sync.set");
-
-  const response = await harness.sendMessage({
-    type: "NCH_SET_WEEKLY_REFRESH_ENABLED",
-    enabled: false
-  });
-  assert.deepEqual(response, { ok: false, enabled: true });
-  assert.equal(harness.sync[schedule.AUTO_REFRESH_KEY], true);
-  assert.equal(harness.local[schedule.LAST_REFRESH_KEY], lastRefreshAt);
-  assert.equal(harness.local[schedule.REFRESH_TICK_KEY], lastRefreshAt - 1);
-  assert.deepEqual(harness.alarms.get(schedule.ALARM_NAME), oldAlarm);
+  assert.equal(Object.hasOwn(harness.sync, "weeklyCacheRefresh"), false);
+  assert.equal(Object.hasOwn(harness.local, "nchCatalogLastAutoRefreshAt"), false);
+  assert.equal(Object.hasOwn(harness.local, "nchCatalogAutoRefreshTick"), false);
+  assert.equal(harness.sync.unrelatedSync, "keep");
+  assert.equal(harness.local.unrelatedLocal, "keep");
 });

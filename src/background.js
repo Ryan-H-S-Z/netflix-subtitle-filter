@@ -1,12 +1,18 @@
 "use strict";
 
-importScripts("config.js", "cache-schedule.js", "netflix-catalog.js");
+importScripts("config.js", "netflix-catalog.js", "latest-catalog.js");
 
 const config = globalThis.NetflixSubtitleConfig;
-const schedule = globalThis.NetflixSubtitleCacheSchedule;
 const catalog = globalThis.NetflixSubtitleCatalog;
+const latestCatalog = globalThis.NetflixSubtitleLatestCatalog;
 const CATALOG_FETCH_LEASES_KEY = `${config.CATALOG_CACHE_KEY}:fetch-leases`;
 const CATALOG_FETCH_LEASE_MS = 10 * 60 * 1000;
+const MAX_LATEST_SCOPES = 4;
+const LEGACY_WEEKLY_SYNC_KEYS = ["weeklyCacheRefresh"];
+const LEGACY_WEEKLY_LOCAL_KEYS = [
+  "nchCatalogLastAutoRefreshAt",
+  "nchCatalogAutoRefreshTick"
+];
 let taskQueue = Promise.resolve();
 
 function enqueue(task) {
@@ -216,6 +222,7 @@ async function clearCatalogCache() {
     await chrome.storage.local.remove(recordKeys);
   }
   await chrome.storage.local.remove(CATALOG_FETCH_LEASES_KEY);
+  await chrome.storage.local.remove(config.LATEST_SNAPSHOTS_KEY);
   await chrome.storage.local.set({ [config.CATALOG_CACHE_KEY]: nextMeta });
   return nextMeta.generation;
 }
@@ -334,206 +341,204 @@ async function releaseCatalogFetchLease(message) {
   return { ok: true, released: true };
 }
 
-async function autoRefreshEnabled() {
-  const stored = await chrome.storage.sync.get({
-    [schedule.AUTO_REFRESH_KEY]: false
-  });
-  return stored[schedule.AUTO_REFRESH_KEY] === true;
+function validLatestScope(scope) {
+  return typeof scope === "string" && scope.length > 0 && scope.length <= 160;
 }
 
-async function createAlarm(lastRefreshAt, now = Date.now()) {
-  const when = Math.max(now + 60 * 1000, schedule.nextDueAt(lastRefreshAt, now));
-  await chrome.alarms.create(schedule.ALARM_NAME, {
-    when,
-    periodInMinutes: schedule.WEEK_MINUTES
-  });
-}
-
-async function publishRefreshTick(now = Date.now()) {
-  await chrome.storage.local.set({
-    [schedule.LAST_REFRESH_KEY]: now,
-    [schedule.REFRESH_TICK_KEY]: now
-  });
-  await createAlarm(now, now);
-}
-
-async function disableWeeklySchedule() {
-  await chrome.alarms.clear(schedule.ALARM_NAME);
-  await chrome.storage.local.remove(schedule.REFRESH_TICK_KEY);
-}
-
-async function refreshIfDue(now = Date.now()) {
-  if (!await autoRefreshEnabled()) {
-    await disableWeeklySchedule();
-    return false;
+async function readLatestStore() {
+  const stored = await chrome.storage.local.get(config.LATEST_SNAPSHOTS_KEY);
+  const value = stored[config.LATEST_SNAPSHOTS_KEY];
+  if (value?.version === 1 && value.entries && typeof value.entries === "object") {
+    return { version: 1, entries: { ...value.entries } };
   }
+  return { version: 1, entries: {} };
+}
 
-  // Always re-read LAST inside the serialized task. A reconcile and a queued
-  // alarm event can therefore observe the tick published by the earlier task
-  // instead of publishing the same weekly refresh twice.
-  const stored = await chrome.storage.local.get(schedule.LAST_REFRESH_KEY);
-  let lastRefreshAt = schedule.validTimestamp(stored[schedule.LAST_REFRESH_KEY]);
-  if (!lastRefreshAt) {
-    lastRefreshAt = now;
-    await chrome.storage.local.set({ [schedule.LAST_REFRESH_KEY]: lastRefreshAt });
-    await chrome.storage.local.remove(schedule.REFRESH_TICK_KEY);
+function validStoredLatestSnapshot(snapshot, scope, generation) {
+  return latestCatalog.validSnapshot(snapshot, scope, generation)
+    && latestCatalog.validTransitionEvidence(snapshot.epochEvidence, snapshot);
+}
+
+async function getLatestSnapshot(scope) {
+  if (!validLatestScope(scope)) {
+    throw new Error("Invalid latest snapshot scope");
   }
+  const meta = await readCatalogMeta();
+  const store = await readLatestStore();
+  const candidate = store.entries[scope];
+  const snapshot = validStoredLatestSnapshot(candidate, scope, meta.generation)
+    ? candidate
+    : null;
+  return { ok: true, generation: meta.generation, snapshot };
+}
 
-  if (schedule.isDue(lastRefreshAt, now)) {
-    await publishRefreshTick(now);
+function sameLatestSnapshotEpoch(left, right) {
+  return Boolean(
+    latestCatalog.sameSnapshotSet(left, right)
+    && left.capturedAt === right.capturedAt
+    && left.listId === right.listId
+    && left.epochEvidence === right.epochEvidence
+  );
+}
+
+async function latestCatalogEvidenceIsPersisted(
+  codes,
+  scope,
+  generation,
+  evidence,
+  minimumBuiltAt
+) {
+  if (!codes.length) {
     return true;
   }
-
-  const alarm = await chrome.alarms.get(schedule.ALARM_NAME);
-  if (!schedule.alarmMatches(alarm, lastRefreshAt, now)) {
-    await createAlarm(lastRefreshAt, now);
+  if (
+    catalog.requestedLatestEvidence(evidence) !== evidence
+    || codes.some((code) => !config.LANGUAGES[code]?.genreId)
+  ) {
+    return false;
   }
-  return false;
+  const storageKeys = Object.fromEntries(codes.map((code) => [
+    code,
+    catalog.cacheRecordStorageKey(scope, code, generation)
+  ]));
+  const stored = await chrome.storage.local.get(Object.values(storageKeys));
+  return codes.every((code) => {
+    const record = stored[storageKeys[code]];
+    return catalog.validCacheRecord(record, code, scope, Date.now(), generation)
+      && catalog.recordMeetsLatestEvidence(record, minimumBuiltAt, evidence);
+  });
 }
 
-async function reconcileAlarm() {
-  await refreshIfDue(Date.now());
-}
-
-async function resetWeeklySchedule() {
-  await chrome.storage.local.remove(schedule.REFRESH_TICK_KEY);
-  if (!await autoRefreshEnabled()) {
-    await chrome.alarms.clear(schedule.ALARM_NAME);
-    return;
+async function commitLatestSnapshot(message) {
+  const scope = String(message?.scope || "");
+  const generation = Number(message?.generation);
+  const expectedSnapshot = message?.expectedSnapshot ?? null;
+  const snapshot = message?.snapshot;
+  if (
+    !validLatestScope(scope)
+    || !Number.isInteger(generation)
+    || generation < 0
+    || !latestCatalog.validSnapshot(snapshot, scope, generation)
+    || !latestCatalog.validTransitionEvidence(snapshot?.epochEvidence, snapshot)
+    || (
+      expectedSnapshot !== null
+      && !latestCatalog.validSnapshot(expectedSnapshot, scope, generation)
+    )
+  ) {
+    throw new Error("Invalid latest snapshot commit");
   }
-  const now = Date.now();
-  await chrome.storage.local.set({ [schedule.LAST_REFRESH_KEY]: now });
-  await createAlarm(now, now);
-}
 
-async function restoreLocalSchedule(snapshot) {
-  const restore = {};
-  const remove = [];
-  for (const key of [schedule.LAST_REFRESH_KEY, schedule.REFRESH_TICK_KEY]) {
-    if (Object.prototype.hasOwnProperty.call(snapshot, key)) {
-      restore[key] = snapshot[key];
-    } else {
-      remove.push(key);
+  const meta = await readCatalogMeta();
+  if (meta.generation !== generation) {
+    return { ok: false, conflict: true, generation: meta.generation };
+  }
+  const store = await readLatestStore();
+  const currentCandidate = store.entries[scope];
+  const current = validStoredLatestSnapshot(currentCandidate, scope, generation)
+    ? currentCandidate
+    : null;
+  const currentMatchesExpected = expectedSnapshot === null
+    ? current === null
+    : sameLatestSnapshotEpoch(current, expectedSnapshot);
+  const currentIsSameSet = latestCatalog.sameSnapshotSet(current, snapshot);
+  const expectedEvidence = currentIsSameSet && current?.epochEvidence
+    ? current.epochEvidence
+    : latestCatalog.transitionEvidence(expectedSnapshot, snapshot);
+  const sameTransitionWinner = currentIsSameSet
+    && current?.epochEvidence === snapshot.epochEvidence;
+  if (
+    snapshot.epochEvidence !== expectedEvidence
+    || (!currentMatchesExpected && !sameTransitionWinner)
+  ) {
+    return {
+      ok: false,
+      conflict: true,
+      generation,
+      snapshot: current
+    };
+  }
+  const currentLanguages = Array.isArray(current?.verifiedLanguages)
+    ? current.verifiedLanguages
+    : [];
+  const nextLanguages = Array.isArray(snapshot.verifiedLanguages)
+    ? snapshot.verifiedLanguages
+    : [];
+  if (nextLanguages.some((code) => !config.LANGUAGES[code]?.genreId)) {
+    throw new Error("Invalid latest snapshot languages");
+  }
+  const difference = current
+    ? latestCatalog.diffSnapshots(current, snapshot)
+    : { added: snapshot.ids.slice() };
+  const requiredPersistedLanguages = !current || difference.added.length > 0
+    ? nextLanguages
+    : nextLanguages.filter((code) => !currentLanguages.includes(code));
+  if (!await latestCatalogEvidenceIsPersisted(
+    requiredPersistedLanguages,
+    scope,
+    generation,
+    message?.catalogEvidence,
+    snapshot.capturedAt
+  )) {
+    return {
+      ok: false,
+      persistenceConflict: true,
+      generation,
+      snapshot: current
+    };
+  }
+  const mergedLanguages = currentIsSameSet
+    ? Array.from(new Set([...currentLanguages, ...nextLanguages])).sort()
+    : nextLanguages;
+  const sameSetBase = currentIsSameSet
+    && Number(current.capturedAt) > Number(snapshot.capturedAt)
+    ? current
+    : snapshot;
+  const snapshotToStore = currentIsSameSet
+    ? {
+      ...sameSetBase,
+      epochEvidence: snapshot.epochEvidence,
+      verifiedLanguages: mergedLanguages
     }
+    : snapshot;
+  if (
+    currentIsSameSet
+    && currentLanguages.length === mergedLanguages.length
+    && currentLanguages.every((code, index) => code === mergedLanguages[index])
+    && Number(current.capturedAt) >= Number(snapshot.capturedAt)
+    && current.listId === sameSetBase.listId
+  ) {
+    return { ok: true, written: false, generation, snapshot: current };
   }
-  if (Object.keys(restore).length) {
-    await chrome.storage.local.set(restore);
-  }
-  if (remove.length) {
-    await chrome.storage.local.remove(remove);
-  }
+
+  const entries = { ...store.entries, [scope]: snapshotToStore };
+  const ordered = Object.entries(entries)
+    .filter(([, candidate]) => validStoredLatestSnapshot(
+      candidate,
+      candidate?.scope,
+      generation
+    ))
+    .sort(([, left], [, right]) => Number(right.capturedAt) - Number(left.capturedAt));
+  const prunedEntries = Object.fromEntries(ordered.slice(0, MAX_LATEST_SCOPES));
+  await chrome.storage.local.set({
+    [config.LATEST_SNAPSHOTS_KEY]: { version: 1, entries: prunedEntries }
+  });
+  return { ok: true, written: true, generation, snapshot: snapshotToStore };
 }
 
-async function restoreAlarm(snapshot) {
-  if (!snapshot) {
-    await chrome.alarms.clear(schedule.ALARM_NAME);
-    return;
-  }
-  const alarmInfo = {};
-  if (Number.isFinite(Number(snapshot.scheduledTime))) {
-    alarmInfo.when = Math.max(Date.now() + 1000, Number(snapshot.scheduledTime));
-  }
-  if (Number.isFinite(Number(snapshot.periodInMinutes))) {
-    alarmInfo.periodInMinutes = Number(snapshot.periodInMinutes);
-  }
-  if (Object.keys(alarmInfo).length) {
-    await chrome.alarms.create(schedule.ALARM_NAME, alarmInfo);
-  }
-}
-
-async function setWeeklyRefreshEnabled(enabled) {
-  const requested = enabled === true;
-  const [syncSnapshot, localSnapshot, alarmSnapshot] = await Promise.all([
-    chrome.storage.sync.get(schedule.AUTO_REFRESH_KEY),
-    chrome.storage.local.get([
-      schedule.LAST_REFRESH_KEY,
-      schedule.REFRESH_TICK_KEY
-    ]),
-    chrome.alarms.get(schedule.ALARM_NAME)
+async function cleanupLegacyWeeklySettings() {
+  await Promise.all([
+    chrome.storage.sync.remove(LEGACY_WEEKLY_SYNC_KEYS),
+    chrome.storage.local.remove(LEGACY_WEEKLY_LOCAL_KEYS)
   ]);
-  const previousEnabled = syncSnapshot[schedule.AUTO_REFRESH_KEY] === true;
-
-  try {
-    if (requested) {
-      const now = Date.now();
-      await chrome.storage.local.set({ [schedule.LAST_REFRESH_KEY]: now });
-      await chrome.storage.local.remove(schedule.REFRESH_TICK_KEY);
-      await createAlarm(now, now);
-      await chrome.storage.sync.set({ [schedule.AUTO_REFRESH_KEY]: true });
-    } else {
-      await disableWeeklySchedule();
-      await chrome.storage.sync.set({ [schedule.AUTO_REFRESH_KEY]: false });
-    }
-    return { ok: true, enabled: requested };
-  } catch (_error) {
-    try {
-      await chrome.storage.sync.set({ [schedule.AUTO_REFRESH_KEY]: previousEnabled });
-    } catch (_rollbackError) {
-      // Continue with the remaining compensation steps.
-    }
-    try {
-      await restoreLocalSchedule(localSnapshot);
-    } catch (_rollbackError) {
-      // Continue so the alarm can still be restored or reconciled.
-    }
-    try {
-      await restoreAlarm(alarmSnapshot);
-    } catch (_rollbackError) {
-      // Reconciliation below gets one more chance to restore consistency.
-    }
-    let actualEnabled = previousEnabled;
-    try {
-      actualEnabled = await autoRefreshEnabled();
-    } catch (_readError) {
-      // Keep the last known value.
-    }
-    try {
-      await reconcileAlarm();
-      actualEnabled = await autoRefreshEnabled();
-    } catch (_reconcileError) {
-      // The popup receives a failed result and the worker retries on next wake.
-    }
-    return { ok: false, enabled: actualEnabled };
-  }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  ignoreTaskFailure(enqueue(async () => {
-    const stored = await chrome.storage.sync.get(schedule.AUTO_REFRESH_KEY);
-    if (typeof stored[schedule.AUTO_REFRESH_KEY] !== "boolean") {
-      await chrome.storage.sync.set({ [schedule.AUTO_REFRESH_KEY]: false });
-    }
-    await reconcileAlarm();
-  }));
-});
-
-chrome.runtime.onStartup.addListener(() => {
-  ignoreTaskFailure(enqueue(reconcileAlarm));
-});
-
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "sync" && changes[schedule.AUTO_REFRESH_KEY]) {
-    // The atomic popup command prepares LAST/alarm before changing sync.
-    // For sync propagation or recovery, reconcile from the final stored value
-    // instead of restarting the seven-day period for each intermediate event.
-    ignoreTaskFailure(enqueue(reconcileAlarm));
-  }
-});
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === schedule.ALARM_NAME) {
-    ignoreTaskFailure(enqueue(() => refreshIfDue(Date.now())));
-  }
+  ignoreTaskFailure(enqueue(cleanupLegacyWeeklySettings));
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   let task;
-  if (message?.type === "NCH_RESET_WEEKLY_REFRESH_SCHEDULE") {
-    task = async () => {
-      await resetWeeklySchedule();
-      return { ok: true };
-    };
-  } else if (message?.type === "NCH_WRITE_CATALOG_CACHE_RECORD") {
+  if (message?.type === "NCH_WRITE_CATALOG_CACHE_RECORD") {
     task = () => writeCatalogCacheRecord(
       message.storageKey,
       message.record,
@@ -556,8 +561,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     task = () => renewCatalogFetchLease(message);
   } else if (message?.type === "NCH_RELEASE_CATALOG_FETCH_LEASE") {
     task = () => releaseCatalogFetchLease(message);
-  } else if (message?.type === "NCH_SET_WEEKLY_REFRESH_ENABLED") {
-    task = () => setWeeklyRefreshEnabled(message.enabled);
+  } else if (message?.type === "NCH_GET_LATEST_SNAPSHOT") {
+    task = () => getLatestSnapshot(message.scope);
+  } else if (message?.type === "NCH_COMMIT_LATEST_SNAPSHOT") {
+    task = () => commitLatestSnapshot(message);
   } else {
     return undefined;
   }
@@ -568,5 +575,3 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   );
   return true;
 });
-
-ignoreTaskFailure(enqueue(reconcileAlarm));

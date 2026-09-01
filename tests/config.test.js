@@ -91,9 +91,8 @@ test("normalizes exact localized titles without fuzzy matching", () => {
   assert.equal(config.normalizeTitle(""), "");
 });
 
-test("defaults to English UI with manual-only cache updates", () => {
+test("defaults to English UI and exposes the latest snapshot store", () => {
   assert.equal(config.DEFAULT_UI_LANGUAGE, "en");
-  assert.equal(config.DEFAULT_WEEKLY_CACHE_REFRESH, false);
   assert.equal(config.DEFAULT_SETTINGS.uiLanguage, undefined);
-  assert.equal(config.WEEKLY_CACHE_REFRESH_KEY, "weeklyCacheRefresh");
+  assert.equal(config.LATEST_SNAPSHOTS_KEY, "nchLatestSnapshotsV1");
 });

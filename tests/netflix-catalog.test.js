@@ -3,6 +3,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const catalog = require("../src/netflix-catalog.js");
+const LATEST_EVIDENCE = "1797aa77:1800000000000:1000,2000>33839491:10462789";
+const OTHER_LATEST_EVIDENCE = "1797aa77:1800000000100:1000,2000>33839491:10462789";
 
 test("builds the Falcor genre reference path", () => {
   assert.deepEqual(catalog.buildCatalogPath("81582792", 200, 399), [
@@ -354,7 +356,65 @@ test("keeps complete cache records until manual refresh for the same profile sco
     titleSourceCount: 0
   }, "en", "TH-test", now), true);
   assert.equal(catalog.validCacheRecord({ ...record, genreId: "old" }, "en", "TH-test", now), false);
+  assert.equal(catalog.validCacheRecord({
+    ...record,
+    latestEvidence: LATEST_EVIDENCE
+  }, "en", "TH-test", now), true);
+  assert.equal(catalog.validCacheRecord({ ...record, latestEvidence: "invalid" }, "en", "TH-test", now), false);
   assert.equal(catalog.validCacheRecord({ ...record, version: 4 }, "en", "TH-test", now), false);
+});
+
+test("a forced refresh rejects its starting cache but accepts a newer concurrent record", () => {
+  const startingRecord = { builtAt: 1_800_000_000_000 };
+  const concurrentRecord = { builtAt: 1_800_000_000_001 };
+  const snapshotCapturedAt = 1_800_000_000_100;
+
+  assert.equal(
+    catalog.forcedMinimumBuiltAt(true, startingRecord, snapshotCapturedAt),
+    snapshotCapturedAt,
+    "a latest refresh must be bound to the newer B snapshot"
+  );
+  assert.equal(
+    catalog.forcedMinimumBuiltAt(true, startingRecord, startingRecord.builtAt - 1),
+    startingRecord.builtAt + 1
+  );
+  assert.equal(catalog.forcedMinimumBuiltAt(false, startingRecord, snapshotCapturedAt), null);
+  assert.equal(catalog.requestedMinimumBuiltAt(snapshotCapturedAt), snapshotCapturedAt);
+  assert.equal(catalog.requestedMinimumBuiltAt(0), null);
+  assert.equal(
+    catalog.requestedLatestEvidence(LATEST_EVIDENCE),
+    LATEST_EVIDENCE
+  );
+  assert.equal(catalog.requestedLatestEvidence("not-evidence"), null);
+
+  assert.equal(catalog.recordMeetsMinimumBuiltAt(startingRecord, null), true);
+  assert.equal(
+    catalog.recordMeetsMinimumBuiltAt(startingRecord, startingRecord.builtAt + 1),
+    false,
+    "force must not reuse the record that caused the refresh"
+  );
+  assert.equal(
+    catalog.recordMeetsMinimumBuiltAt(concurrentRecord, startingRecord.builtAt + 1),
+    true,
+    "another tab may satisfy the same refresh with a newer record"
+  );
+  assert.equal(
+    catalog.recordMeetsLatestEvidence(
+      { ...startingRecord, latestEvidence: LATEST_EVIDENCE },
+      snapshotCapturedAt,
+      LATEST_EVIDENCE
+    ),
+    true,
+    "tabs verifying the same exact latest set may share the earlier record"
+  );
+  assert.equal(
+    catalog.recordMeetsLatestEvidence(
+      { ...startingRecord, latestEvidence: LATEST_EVIDENCE },
+      snapshotCapturedAt,
+      OTHER_LATEST_EVIDENCE
+    ),
+    false
+  );
 });
 
 test("uses generation-specific per-language storage keys", () => {
@@ -362,13 +422,6 @@ test("uses generation-specific per-language storage keys", () => {
     catalog.cacheRecordStorageKey("TH-test", "en", 4),
     `${catalog.CACHE_RECORD_PREFIX}g4:TH-test:en`
   );
-});
-
-test("refreshes only records built before the latest weekly refresh tick", () => {
-  assert.equal(catalog.cacheNeedsAutoRefresh({ builtAt: 1000 }, 1001), true);
-  assert.equal(catalog.cacheNeedsAutoRefresh({ builtAt: 1001 }, 1001), false);
-  assert.equal(catalog.cacheNeedsAutoRefresh({ builtAt: 2000 }, 1001), false);
-  assert.equal(catalog.cacheNeedsAutoRefresh({ builtAt: 1000 }, 0), false);
 });
 
 test("keeps stale complete names only as positive evidence when name refresh fails", () => {
