@@ -1,0 +1,13 @@
+html.nch-hide-home-billboard .billboard-row,
+html.nch-hide-home-billboard .billboard-motion,
+html.nch-hide-home-billboard [data-uia="billboard"] {
+  display: none !important;
+}
+
+/* Remove the catalogue overlap used beneath the full-height hero. */
+html.nch-hide-home-billboard .lolomo:has(.billboard-row),
+html.nch-hide-home-billboard .lolomo:has(.billboard-motion),
+html.nch-hide-home-billboard .lolomo:has([data-uia="billboard"]) {
+  margin-top: 0 !important;
+  padding-top: 24px !important;
+}

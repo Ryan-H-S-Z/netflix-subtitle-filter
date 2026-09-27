@@ -1,5 +1,9 @@
 # Netflix Subtitle Filter
 
+播放已加载本地字幕的影片时，可使用 **W/S** 上移/下移字幕（每次 2%，范围 4%–40%），**A/D** 提前/延后字幕（每次 0.5 秒，范围 ±30 秒）。支持长按；输入框、输入法组合输入及 Ctrl/Command/Alt/Shift 组合键不会触发。
+
+新增独立开关「隐藏首页顶部推荐影片」：默认关闭，切换后自动保存并立即生效。开启后隐藏首页大幅推荐区域并暂停其中的预告播放；不依赖字幕筛选开关，电影、节目和播放页面保持原样。
+
 [English](./README.md) | **简体中文**
 
 [项目主页](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter) · [提交问题或建议](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/issues) · [下载版本](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/releases)

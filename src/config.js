@@ -60,6 +60,7 @@
   const DEFAULT_SETTINGS = Object.freeze({
     preferredLanguage: "zh-hant",
     showFloatingButton: true,
+    hideHomeBillboard: false,
     subtitleEncoding: "auto",
     subtitleFontSize: 38,
     subtitleBottom: 12,

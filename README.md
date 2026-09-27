@@ -1,5 +1,9 @@
 # Netflix Subtitle Filter
 
+While playing a title with imported local subtitles, use **W/S** to move subtitles up/down (2% per press, 4%–40%) and **A/D** to advance/delay them (0.5 seconds per press, ±30 seconds). Holding a key repeats the adjustment. Text inputs, IME composition, and Ctrl/Command/Alt/Shift combinations are ignored.
+
+The independent **Hide featured title on home page** switch is off by default and saves/applies immediately. It hides the large home page banner and pauses its preview video, independently of subtitle filtering. Movie, TV, and playback pages keep their original layout.
+
 **English** | [简体中文](./README.zh-CN.md)
 
 [Repository](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter) · [Report an issue](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/issues) · [Download releases](https://github.com/Ryan-H-S-Z/netflix-subtitle-filter/releases)

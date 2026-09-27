@@ -263,7 +263,7 @@
           </div>
 
           <div class="panel-section">
-            <span class="field-label">时间同步</span>
+            <span class="field-label">时间同步 · A 提前 / D 延后（每次 0.5 秒）</span>
             <div class="row">
               <button type="button" data-offset="-0.5">字幕提前</button>
               <span class="value" id="offset-value">0.0 秒</span>
@@ -284,7 +284,7 @@
               </div>
             </div>
             <div class="row spread">
-              <span class="field-label">字幕高度</span>
+              <span class="field-label">字幕高度 · W ↑ / S ↓</span>
               <div class="row">
                 <button type="button" data-bottom="-2" aria-label="降低字幕">↓</button>
                 <span class="value" id="bottom-value"></span>
@@ -434,7 +434,7 @@
 
     const subtitleTime = video.currentTime - state.offset;
     const activeCues = findActiveCues(subtitleTime);
-    const signature = activeCues
+    const signature = `${state.settings.subtitleBottom}:` + activeCues
       .map((cue) => `${cue.start}|${cue.end}|${cue.text}`)
       .join("\u0000");
 
@@ -449,7 +449,10 @@
         }
 
         try {
-          track.addCue(new VTTCue(start, end, cue.text));
+          const nativeCue = new VTTCue(start, end, cue.text);
+          nativeCue.snapToLines = false;
+          nativeCue.line = 100 - Number(state.settings.subtitleBottom);
+          track.addCue(nativeCue);
         } catch (_error) {
           // Ignore a malformed current cue while keeping playback usable.
         }
@@ -793,6 +796,61 @@
     await chrome.storage.sync.set(partial);
   }
 
+  function adjustSubtitleOffset(delta) {
+    state.offset = Math.max(-30, Math.min(30, state.offset + delta));
+    updateOffsetLabel();
+    state.nativeTrackSignature = "";
+    renderSubtitles();
+  }
+
+  let subtitlePositionSaveTimer = null;
+  function adjustSubtitlePosition(delta) {
+    const next = Math.max(4, Math.min(40, Number(state.settings.subtitleBottom) + delta));
+    state.settings.subtitleBottom = next;
+    updateStyleControls();
+    state.nativeTrackSignature = "";
+    renderSubtitles();
+    // Coalesce held-key repeats into one storage write.
+    window.clearTimeout(subtitlePositionSaveTimer);
+    subtitlePositionSaveTimer = window.setTimeout(() => {
+      chrome.storage.sync.set({ subtitleBottom: state.settings.subtitleBottom }).catch(() => {
+        showToast("字幕位置已调整，但未能保存设置");
+      });
+    }, 350);
+  }
+
+  function handleSubtitleShortcut(event) {
+    if (!isWatchPage() || !state.cues.length || state.loadedVideoId !== getVideoId()
+      || event.defaultPrevented || event.isComposing || event.keyCode === 229
+      || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+      return;
+    }
+    // A closed shadow root retargets document events to its host. Inspect its
+    // active element as well so typing in the subtitle panel is also ignored.
+    const targets = [...event.composedPath(), shadow.activeElement];
+    if (targets.some((target) => target instanceof Element && (
+      target.matches("input, textarea, select, [role='textbox'], [role='searchbox'], [role='combobox']")
+      || target.isContentEditable
+    ))) {
+      return;
+    }
+    const key = event.key.toLowerCase();
+    if (!["w", "s", "a", "d"].includes(key)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (key === "w" || key === "s") {
+      adjustSubtitlePosition(key === "w" ? 2 : -2);
+      showToast(`字幕高度：${state.settings.subtitleBottom}%`);
+    } else {
+      adjustSubtitleOffset(key === "a" ? -0.5 : 0.5);
+      showToast(`字幕时间：${state.offset > 0 ? "+" : ""}${state.offset.toFixed(1)} 秒`);
+    }
+  }
+
+  document.addEventListener("keydown", handleSubtitleShortcut, true);
+
   elements.primaryAction.addEventListener("click", () => {
     if (isWatchPage()) {
       setPanelOpen(!state.panelOpen);
@@ -865,12 +923,7 @@
 
   shadow.querySelectorAll("[data-offset]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.offset = Math.max(-30, Math.min(30, state.offset + Number(button.dataset.offset)));
-      updateOffsetLabel();
-      if (isVideoFullscreen()) {
-        state.nativeTrackSignature = "";
-        updateNativeFullscreenCues(state.videoElement);
-      }
+      adjustSubtitleOffset(Number(button.dataset.offset));
     });
   });
 
@@ -892,8 +945,7 @@
 
   shadow.querySelectorAll("[data-bottom]").forEach((button) => {
     button.addEventListener("click", () => {
-      const next = Math.max(4, Math.min(40, Number(state.settings.subtitleBottom) + Number(button.dataset.bottom)));
-      saveSettings({ subtitleBottom: next });
+      adjustSubtitlePosition(Number(button.dataset.bottom));
     });
   });
 

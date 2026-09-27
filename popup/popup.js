@@ -6,6 +6,7 @@
   const rules = globalThis.NetflixSubtitleFilterRules;
   const catalog = globalThis.NetflixSubtitleCatalog;
   const filterEnabledInput = document.getElementById("filter-enabled");
+  const hideHomeBillboardInput = document.getElementById("hide-home-billboard");
   const hideUnsupportedInput = document.getElementById("hide-unsupported");
   const groupsContainer = document.getElementById("filter-groups");
   const addGroupButton = document.getElementById("add-group");
@@ -123,6 +124,7 @@
     uiLanguageSelect.disabled = locked;
     filterEnabledInput.disabled = locked;
     hideUnsupportedInput.disabled = locked;
+    hideHomeBillboardInput.disabled = locked;
     presetButtons.forEach((button) => {
       button.disabled = locked;
     });
@@ -537,6 +539,24 @@
     });
   });
 
+  hideHomeBillboardInput.addEventListener("change", async () => {
+    const requestedValue = hideHomeBillboardInput.checked;
+    const operation = beginBusyOperation("home-billboard");
+    if (!operation) {
+      hideHomeBillboardInput.checked = !requestedValue;
+      return;
+    }
+    try {
+      await chrome.storage.sync.set({ hideHomeBillboard: requestedValue });
+      setStatus(t(requestedValue ? "homeBillboardHidden" : "homeBillboardShown"));
+    } catch (_error) {
+      hideHomeBillboardInput.checked = !requestedValue;
+      setStatus(t("saveFailed"), true);
+    } finally {
+      endBusyOperation(operation);
+    }
+  });
+
   showFloatingInput.addEventListener("change", async () => {
     const requestedValue = showFloatingInput.checked;
     const operation = beginBusyOperation("floating-button");
@@ -592,6 +612,7 @@
     updateFilterStateLabel();
     hideUnsupportedInput.checked = filterDraft.unsupportedMode === rules.UNSUPPORTED_MODE_HIDE;
     showFloatingInput.checked = Boolean(settings.showFloatingButton);
+    hideHomeBillboardInput.checked = settings.hideHomeBillboard === true;
 
     const preferredInput = preferredLanguageInputs.find((input) => input.value === preferredLanguage);
     if (preferredInput) {
