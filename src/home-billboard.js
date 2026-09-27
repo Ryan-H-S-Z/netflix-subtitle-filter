@@ -4,38 +4,84 @@
   const config = globalThis.NetflixSubtitleConfig;
   const HIDDEN_CLASS = "nch-hide-home-billboard";
   const BILLBOARD_SELECTOR = '.billboard-row, .billboard-motion, [data-uia="billboard"]';
+  const DETAIL_SELECTOR = '[role="dialog"], .previewModal--container';
+  const blockedMedia = new Map();
   let enabled = config.DEFAULT_SETTINGS.hideHomeBillboard;
   let settingsRevision = 0;
 
   function isHidden() {
-    return enabled && /^\/(?:browse\/?)?$/.test(location.pathname);
+    return enabled && (location.pathname === "/"
+      || /^\/(?:browse|latest|search|games)(?:\/|$)/.test(location.pathname));
   }
 
-  function pausePreview(event) {
-    const video = event.target;
-    if (isHidden() && video?.tagName === "VIDEO" && video.closest(BILLBOARD_SELECTOR)) {
-      video.pause();
+  function isPreview(media) {
+    return isHidden() && /^(VIDEO|AUDIO)$/.test(media?.tagName || "")
+      && media.closest(BILLBOARD_SELECTOR) && !media.closest(DETAIL_SELECTOR);
+  }
+
+  function restoreControls(media, previous) {
+    media.muted = previous.muted;
+    media.defaultMuted = previous.defaultMuted;
+    media.autoplay = previous.autoplay;
+    if (previous.preload === null) {
+      media.removeAttribute("preload");
+    } else {
+      media.setAttribute("preload", previous.preload);
     }
+    // A released MediaSource/blob cannot safely be reattached. Netflix must
+    // recreate the preview (refresh the page to restore it after disabling).
+  }
+
+  function stopPreview(media) {
+    if (!isPreview(media)) {
+      return;
+    }
+    const firstStop = !blockedMedia.has(media);
+    if (firstStop) {
+      blockedMedia.set(media, {
+        muted: media.muted,
+        defaultMuted: media.defaultMuted,
+        autoplay: media.autoplay,
+        preload: media.getAttribute("preload")
+      });
+    }
+    if (!media.muted) media.muted = true;
+    if (!media.defaultMuted) media.defaultMuted = true;
+    if (media.autoplay) media.autoplay = false;
+    if (media.getAttribute("preload") !== "none") media.setAttribute("preload", "none");
+    if (!media.paused) media.pause();
+
+    let hasSource = media.hasAttribute("src") || media.srcObject != null;
+    if (media.hasAttribute("src")) media.removeAttribute("src");
+    if (media.srcObject != null) media.srcObject = null;
+    for (const source of media.querySelectorAll("source[src]")) {
+      source.removeAttribute("src");
+      hasSource = true;
+    }
+    // load() with no sources aborts the browser's current media load and
+    // releases the decoder. Do not repeatedly reset an already-empty player.
+    if (firstStop || hasSource) media.load();
   }
 
   function apply() {
-    const hidden = isHidden();
     const root = document.documentElement;
-    if (root.classList.contains(HIDDEN_CLASS) === hidden) {
-      return;
+    const hidden = isHidden();
+    if (root && root.classList.contains(HIDDEN_CLASS) !== hidden) {
+      root.classList.toggle(HIDDEN_CLASS, hidden);
     }
-    root.classList.toggle(HIDDEN_CLASS, hidden);
-    if (hidden) {
-      for (const video of document.querySelectorAll("video")) {
-        pausePreview({ target: video });
+    for (const [media, previous] of blockedMedia) {
+      if (!media.isConnected || !isPreview(media)) {
+        restoreControls(media, previous);
+        blockedMedia.delete(media);
       }
+    }
+    if (hidden) {
+      for (const media of document.querySelectorAll("video, audio")) stopPreview(media);
     }
   }
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "sync" || !changes.hideHomeBillboard) {
-      return;
-    }
+    if (areaName !== "sync" || !changes.hideHomeBillboard) return;
     settingsRevision += 1;
     enabled = changes.hideHomeBillboard.newValue === true;
     apply();
@@ -51,10 +97,18 @@
     // Leave the original page visible when settings cannot be read.
   });
 
-  // CSS also covers banners inserted after page load. Capture play events so
-  // late-loading previews cannot keep playing in the hidden banner.
-  document.addEventListener("play", pausePreview, true);
+  // Netflix can replace the player or reassign its source after the switch
+  // has been applied. Observe those changes instead of only the root class.
+  new MutationObserver(apply).observe(document, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ["src", "autoplay", "data-uia"]
+  });
+  for (const eventName of ["play", "playing", "loadstart", "volumechange", "canplay"]) {
+    document.addEventListener(eventName, (event) => stopPreview(event.target), true);
+  }
   window.addEventListener("popstate", apply);
-  // Netflix navigates with pushState without reloading content scripts.
+  // Also detects Netflix's pushState routes and non-attribute srcObject writes.
   window.setInterval(apply, 250);
 })();

@@ -2,7 +2,7 @@
 
 While playing a title with imported local subtitles, use **W/S** to move subtitles up/down (2% per press, 4%–40%) and **A/D** to advance/delay them (0.5 seconds per press, ±30 seconds). Holding a key repeats the adjustment. Text inputs, IME composition, and Ctrl/Command/Alt/Shift combinations are ignored.
 
-The independent **Hide featured title on home page** switch is off by default and saves/applies immediately. It hides the large home page banner and pauses its preview video, independently of subtitle filtering. Movie, TV, and playback pages keep their original layout.
+The independent **Disable featured titles on browsing pages** switch covers Home, Movies, TV Shows and other browsing pages. It collapses banners, mutes and pauses their media, removes media sources and aborts the browser’s current media load. Player replacements and source reassignment are handled continuously. Actual playback, detail dialogs and ordinary card previews are excluded. Refresh after disabling to recreate unloaded previews. This is not network request blocking: initial images, preview requests and Netflix-managed data requests may still occur.
 
 **English** | [简体中文](./README.zh-CN.md)
 

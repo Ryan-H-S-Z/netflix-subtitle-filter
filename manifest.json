@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Netflix Subtitle Filter",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Filter Netflix browsing cards by subtitle-language rules and import local subtitles on playback pages.",
   "minimum_chrome_version": "114",
   "permissions": [
@@ -35,6 +35,19 @@
         "https://www.netflix.com/*"
       ],
       "js": [
+        "src/config.js",
+        "src/home-billboard.js"
+      ],
+      "css": [
+        "src/home-billboard.css"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.netflix.com/*"
+      ],
+      "js": [
         "src/video-identity.js",
         "src/netflix-metadata-channel.js"
       ],
@@ -62,12 +75,10 @@
         "src/netflix-catalog.js",
         "src/latest-catalog.js",
         "src/card-layout.js",
-        "src/card-filter.js",
-        "src/home-billboard.js"
+        "src/card-filter.js"
       ],
       "css": [
-        "src/card-filter.css",
-        "src/home-billboard.css"
+        "src/card-filter.css"
       ],
       "run_at": "document_idle"
     },
